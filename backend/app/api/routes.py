@@ -289,7 +289,7 @@ def get_case(case_id: str) -> CaseReport:
         ) from exc
 
 
-@router.get("/cases/{case_id}/preview/{slice_idx}")
+@router.api_route("/cases/{case_id}/preview/{slice_idx}", methods=["GET", "HEAD"])
 def get_slice_preview(case_id: str, slice_idx: int) -> Response:
     """Render and return a 2D PNG preview of the specified sorted slice from raw volume."""
     workspace = config.WORKSPACE_DIR
@@ -327,7 +327,7 @@ def get_slice_preview(case_id: str, slice_idx: int) -> Response:
     )
 
 
-@router.get("/cases/{case_id}/slice/{stage}/{axis}/{index}")
+@router.api_route("/cases/{case_id}/slice/{stage}/{axis}/{index}", methods=["GET", "HEAD"])
 def get_orthogonal_slice(case_id: str, stage: str, axis: str, index: int) -> Response:
     """Render an orthogonal 2D PNG slice (axial, coronal, sagittal) for 'raw' or 'corrected' stage.
 
@@ -585,7 +585,7 @@ def _hex_to_rgb(hex_str: str) -> Tuple[int, int, int]:
     return (56, 189, 248)
 
 
-@router.get("/cases/{case_id}/overlay/{axis}/{index}")
+@router.api_route("/cases/{case_id}/overlay/{axis}/{index}", methods=["GET", "HEAD"])
 def get_overlay_slice(
     case_id: str,
     axis: str,

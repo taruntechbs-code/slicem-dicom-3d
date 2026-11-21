@@ -717,6 +717,24 @@ const CorrectStepView: React.FC<CorrectStepViewProps> = ({
 
   useEffect(() => {
     let isMounted = true;
+
+    // Immediately baseline slice counts from scan metadata when axis or case changes
+    if (axis === 'axial') {
+      setRawSliceCount(scan.slice_count || 60);
+      setCorrSliceCount(Math.round((scan.slice_count || 60) * (isCorrected ? 2 : 1)));
+    } else if (axis === 'coronal') {
+      setRawSliceCount(scan.rows || 128);
+      setCorrSliceCount(scan.rows || 128);
+    } else {
+      setRawSliceCount(scan.cols || 128);
+      setCorrSliceCount(scan.cols || 128);
+    }
+
+    // Default initial slider position to the middle (50%) whenever axis or case changes
+    setSliderPercent(50);
+    setRawImageError(false);
+    setCorrectedImageError(false);
+
     const updateCounts = async () => {
       try {
         const rCount = await api.fetchSliceCount(activeCase.case_id, 'raw', axis);
@@ -732,12 +750,10 @@ const CorrectStepView: React.FC<CorrectStepViewProps> = ({
     };
 
     updateCounts();
-    setRawImageError(false);
-    setCorrectedImageError(false);
     return () => {
       isMounted = false;
     };
-  }, [axis, activeCase.case_id, isCorrected]);
+  }, [axis, activeCase.case_id, isCorrected, scan.slice_count, scan.rows, scan.cols]);
 
   useEffect(() => {
     setRawImageError(false);
@@ -935,15 +951,20 @@ const CorrectStepView: React.FC<CorrectStepViewProps> = ({
             )}
           </div>
           <div className="aspect-square bg-black rounded-2xl overflow-hidden border border-white/[0.08] flex items-center justify-center">
-            {!isCorrected ? (
+            {g.isotropic_spacing_mm == null || !correctedUrl ? (
               <div className="text-center p-6 space-y-2 text-[#86868B]">
                 <span className="text-xs font-medium text-[#F5F5F7] block">Volume Not Corrected</span>
                 <span className="text-[11px] block">
-                  Run Correction to generate the deskewed isotropic volume.
+                  Run Correction to generate deskewed volume
                 </span>
               </div>
             ) : correctedImageError ? (
-              <div className="text-center p-4 text-xs text-[#86868B]">Corrected slice not found</div>
+              <div className="text-center p-6 space-y-2 text-[#86868B]">
+                <span className="text-xs font-medium text-[#F5F5F7] block">Volume Not Corrected</span>
+                <span className="text-[11px] block">
+                  Run Correction to generate deskewed volume
+                </span>
+              </div>
             ) : (
               <img
                 src={correctedUrl}

@@ -206,10 +206,12 @@ export const api = {
         `${API_BASE_URL}/api/cases/${encodeURIComponent(caseId)}/slice/${stage}/${axis}/0`,
         { method: 'HEAD' }
       );
-      const headerVal = res.headers.get('X-Slice-Count');
-      if (headerVal) {
-        const count = parseInt(headerVal, 10);
-        if (!isNaN(count) && count > 0) return count;
+      if (res.ok) {
+        const headerVal = res.headers.get('X-Slice-Count');
+        if (headerVal) {
+          const count = parseInt(headerVal, 10);
+          if (!isNaN(count) && count > 0) return count;
+        }
       }
       return 60;
     } catch {
@@ -267,10 +269,12 @@ export const api = {
         `${API_BASE_URL}/api/cases/${encodeURIComponent(caseId)}/overlay/${axis}/0`,
         { method: 'HEAD' }
       );
-      const headerVal = res.headers.get('X-Slice-Count');
-      if (headerVal) {
-        const count = parseInt(headerVal, 10);
-        if (!isNaN(count) && count > 0) return count;
+      if (res.ok) {
+        const headerVal = res.headers.get('X-Slice-Count');
+        if (headerVal) {
+          const count = parseInt(headerVal, 10);
+          if (!isNaN(count) && count > 0) return count;
+        }
       }
       return 60;
     } catch {

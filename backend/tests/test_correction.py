@@ -201,3 +201,13 @@ def test_api_correction_and_orthogonal_slices(tmp_path: Path, monkeypatch: pytes
     cor_res = client.get(f"/api/cases/{case_id}/slice/raw/coronal/64")
     assert cor_res.status_code == 200
     assert cor_res.headers["content-type"] == "image/png"
+
+    # Test HEAD request and CORS expose headers for slice count discovery
+    head_res = client.head(
+        f"/api/cases/{case_id}/slice/raw/coronal/0",
+        headers={"Origin": "http://localhost:5173"},
+    )
+    assert head_res.status_code == 200
+    assert "X-Slice-Count" in head_res.headers
+    assert int(head_res.headers["X-Slice-Count"]) >= 60
+    assert "x-slice-count" in head_res.headers.get("access-control-expose-headers", "").lower()
