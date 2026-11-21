@@ -4,6 +4,7 @@ from datetime import datetime
 import io
 import json
 from pathlib import Path
+import re
 import shutil
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -870,5 +871,85 @@ def export_case_bundle(case_id: str) -> Response:
             "Content-Disposition": f'attachment; filename="{case_id}_bundle.zip"',
         },
     )
+
+
+# ─── Stop 6: Validation & Benchmark Endpoints (Phase 5) ─────────────────────
+
+@router.get("/benchmarks")
+def list_benchmarks() -> List[Dict[str, Any]]:
+    """List all saved benchmark runs in the workspace with metadata and pass rates."""
+    workspace = config.WORKSPACE_DIR
+    benchmarks_dir = workspace / "benchmarks"
+
+    if not benchmarks_dir.is_dir():
+        return []
+
+    results: List[Dict[str, Any]] = []
+    for item in sorted(benchmarks_dir.iterdir(), reverse=True):
+        if item.is_dir():
+            summary_path = item / "summary.json"
+            if summary_path.is_file():
+                try:
+                    with open(summary_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    results.append({
+                        "run_id": data.get("run_id", item.name),
+                        "created_at": data.get("created_at"),
+                        "mode": data.get("mode", "unknown"),
+                        "engine": data.get("engine", "unknown"),
+                        "overall_pass_rate": data.get("overall_pass_rate", 0.0),
+                        "total_cases": data.get("total_cases", 0),
+                        "passed_cases": data.get("passed_cases", 0),
+                        "misses_count": len(data.get("misses_summary", [])),
+                    })
+                except Exception:
+                    continue
+
+    return results
+
+
+@router.get("/benchmarks/{run_id}")
+def get_benchmark(run_id: str) -> Dict[str, Any]:
+    """Retrieve full summary.json payload for a specific benchmark run."""
+    if not re.match(r"^[a-zA-Z0-9_\-]+$", run_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid run_id format",
+        )
+
+    workspace = config.WORKSPACE_DIR.resolve()
+    run_dir = (workspace / "benchmarks" / run_id).resolve()
+
+    if not run_dir.is_dir() or workspace not in run_dir.parents:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Benchmark '{run_id}' not found",
+        )
+
+    summary_path = run_dir / "summary.json"
+    if not summary_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Summary for benchmark '{run_id}' not found",
+        )
+
+    with open(summary_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@router.post("/benchmarks/run-phantom")
+def trigger_phantom_benchmark() -> Dict[str, Any]:
+    """Trigger the 3-case synthetic phantom benchmark suite and return summary results."""
+    from app.validation.run_benchmark import run_phantom_benchmark
+
+    try:
+        summary = run_phantom_benchmark()
+        return summary
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Benchmark execution failed: {exc}",
+        ) from exc
+
 
 

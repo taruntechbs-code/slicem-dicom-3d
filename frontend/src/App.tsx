@@ -26,6 +26,7 @@ import { CaseReport, HealthResponse } from './types/case';
 import { Stepper, STEPS } from './components/Stepper';
 import { StatusBadge } from './components/StatusBadge';
 import { InspectStep } from './components/InspectStep';
+import { ValidationDashboard } from './components/ValidationDashboard';
 
 // Fallback demo report for initial render before backend connects
 const FALLBACK_DEMO_CASE: CaseReport = {
@@ -72,6 +73,7 @@ const FALLBACK_DEMO_CASE: CaseReport = {
 };
 
 export const App: React.FC = () => {
+  const [appMode, setAppMode] = useState<'pipeline' | 'benchmarks'>('pipeline');
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [backendHealth, setBackendHealth] = useState<HealthResponse | null>(null);
   const [isBackendConnected, setIsBackendConnected] = useState<boolean | null>(null);
@@ -153,13 +155,43 @@ export const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Center: Active Case Quick Switcher */}
-          <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/60 text-xs">
-            <Database className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-slate-400">Active Case:</span>
-            <span className="font-mono font-medium text-cyan-300">{activeCase.case_id}</span>
-            <span className="text-slate-500">({activeCase.scan.modality} · {activeCase.scan.slice_count} sl)</span>
-            <StatusBadge status={activeCase.status} size="sm" />
+          {/* Center: Mode Switcher & Active Case */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center p-0.5 rounded-lg bg-slate-950/80 border border-slate-800">
+              <button
+                onClick={() => setAppMode('pipeline')}
+                className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                  appMode === 'pipeline'
+                    ? 'bg-cyan-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Pipeline</span>
+              </button>
+              <button
+                onClick={() => setAppMode('benchmarks')}
+                className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                  appMode === 'benchmarks'
+                    ? 'bg-cyan-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Activity className="w-3.5 h-3.5" />
+                <span>Benchmarks</span>
+              </button>
+            </div>
+
+            {/* Active Case Quick Switcher (visible in pipeline mode) */}
+            {appMode === 'pipeline' && (
+              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/60 text-xs">
+                <Database className="w-3.5 h-3.5 text-slate-400" />
+                <span className="text-slate-400">Case:</span>
+                <span className="font-mono font-medium text-cyan-300">{activeCase.case_id}</span>
+                <span className="text-slate-500">({activeCase.scan.modality})</span>
+                <StatusBadge status={activeCase.status} size="sm" />
+              </div>
+            )}
           </div>
 
           {/* Right: Live Backend Indicator & Actions */}
@@ -219,86 +251,92 @@ export const App: React.FC = () => {
 
       {/* ─── Main Content ───────────────────────────────────────── */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-8 space-y-6">
-        {/* Pipeline Stepper */}
-        <section aria-labelledby="stepper-title">
-          <h2 id="stepper-title" className="sr-only">
-            Pipeline Steps
-          </h2>
-          <Stepper currentStep={currentStep} onSelectStep={(id) => setCurrentStep(id)} />
-        </section>
-
-        {/* Dynamic Workspace Panel */}
-        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-sm">
-          {currentStep === 1 && (
-            <LoadStepView
-              activeCase={activeCase}
-              cases={cases}
-              onSelectCase={setActiveCase}
-              onCaseCreated={handleCaseCreatedOrSelected}
-            />
-          )}
-          {currentStep === 2 && <VerifyStepView activeCase={activeCase} />}
-          {currentStep === 3 && (
-            <CorrectStepView
-              activeCase={activeCase}
-              onCaseUpdated={(updated) => {
-                setActiveCase(updated);
-                setCases((prev) =>
-                  prev.map((c) => (c.case_id === updated.case_id ? updated : c))
-                );
-              }}
-              onProceedToSegment={() => setCurrentStep(4)}
-            />
-          )}
-          {currentStep === 4 && (
-            <SegmentStepView
-              activeCase={activeCase}
-              onCaseUpdated={(updated) => {
-                setActiveCase(updated);
-                setCases((prev) =>
-                  prev.map((c) => (c.case_id === updated.case_id ? updated : c))
-                );
-              }}
-              onProceedToExport={() => setCurrentStep(5)}
-            />
-          )}
-          {currentStep === 5 && (
-            <InspectStep
-              activeCase={activeCase}
-              onCaseUpdated={(updated) => {
-                setActiveCase(updated);
-                setCases((prev) =>
-                  prev.map((c) => (c.case_id === updated.case_id ? updated : c))
-                );
-              }}
-            />
-          )}
-
-          {/* Bottom Step Navigation Bar */}
-          <div className="px-6 py-4 bg-slate-900/80 border-t border-slate-800 flex items-center justify-between">
-            <button
-              onClick={() => setCurrentStep((prev) => Math.max(1, prev - 1))}
-              disabled={currentStep === 1}
-              className="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800/60 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-semibold text-slate-200 transition-colors"
-            >
-              Previous Stop
-            </button>
-            <div className="text-xs text-slate-500 font-mono">
-              Stop {currentStep} of {STEPS.length}: {STEPS[currentStep - 1]?.title}
-            </div>
-            <button
-              onClick={() => setCurrentStep((prev) => Math.min(STEPS.length, prev + 1))}
-              disabled={currentStep === STEPS.length}
-              className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-semibold text-slate-950 font-mono flex items-center gap-1.5 transition-colors"
-            >
-              <span>Next Stop</span>
-              <ChevronRight className="w-4 h-4" />
-            </button>
+        {appMode === 'benchmarks' ? (
+          <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-sm">
+            <ValidationDashboard />
           </div>
-        </div>
+        ) : (
+          <>
+            {/* Pipeline Stepper */}
+            <section aria-labelledby="stepper-title">
+              <h2 id="stepper-title" className="sr-only">
+                Pipeline Steps
+              </h2>
+              <Stepper currentStep={currentStep} onSelectStep={(id) => setCurrentStep(id)} />
+            </section>
 
-        {/* Workspace Cases & Stage Timings Footer */}
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Dynamic Workspace Panel */}
+            <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-sm">
+              {currentStep === 1 && (
+                <LoadStepView
+                  activeCase={activeCase}
+                  cases={cases}
+                  onSelectCase={setActiveCase}
+                  onCaseCreated={handleCaseCreatedOrSelected}
+                />
+              )}
+              {currentStep === 2 && <VerifyStepView activeCase={activeCase} />}
+              {currentStep === 3 && (
+                <CorrectStepView
+                  activeCase={activeCase}
+                  onCaseUpdated={(updated) => {
+                    setActiveCase(updated);
+                    setCases((prev) =>
+                      prev.map((c) => (c.case_id === updated.case_id ? updated : c))
+                    );
+                  }}
+                  onProceedToSegment={() => setCurrentStep(4)}
+                />
+              )}
+              {currentStep === 4 && (
+                <SegmentStepView
+                  activeCase={activeCase}
+                  onCaseUpdated={(updated) => {
+                    setActiveCase(updated);
+                    setCases((prev) =>
+                      prev.map((c) => (c.case_id === updated.case_id ? updated : c))
+                    );
+                  }}
+                  onProceedToExport={() => setCurrentStep(5)}
+                />
+              )}
+              {currentStep === 5 && (
+                <InspectStep
+                  activeCase={activeCase}
+                  onCaseUpdated={(updated) => {
+                    setActiveCase(updated);
+                    setCases((prev) =>
+                      prev.map((c) => (c.case_id === updated.case_id ? updated : c))
+                    );
+                  }}
+                />
+              )}
+
+              {/* Bottom Step Navigation Bar */}
+              <div className="px-6 py-4 bg-slate-900/80 border-t border-slate-800 flex items-center justify-between">
+                <button
+                  onClick={() => setCurrentStep((prev) => Math.max(1, prev - 1))}
+                  disabled={currentStep === 1}
+                  className="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800/60 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-semibold text-slate-200 transition-colors"
+                >
+                  Previous Stop
+                </button>
+                <div className="text-xs text-slate-500 font-mono">
+                  Stop {currentStep} of {STEPS.length}: {STEPS[currentStep - 1]?.title}
+                </div>
+                <button
+                  onClick={() => setCurrentStep((prev) => Math.min(STEPS.length, prev + 1))}
+                  disabled={currentStep === STEPS.length}
+                  className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-semibold text-slate-950 font-mono flex items-center gap-1.5 transition-colors"
+                >
+                  <span>Next Stop</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Workspace Cases & Stage Timings Footer */}
+            <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Workspace Case Browser Card */}
           <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800/80">
             <div className="flex items-center justify-between mb-3">
@@ -377,7 +415,9 @@ export const App: React.FC = () => {
             </div>
           </div>
         </section>
-      </main>
+      </>
+    )}
+  </main>
 
       {/* ─── JSON Contract Modal ─────────────────────────────────── */}
       {showJsonModal && (

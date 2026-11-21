@@ -1,4 +1,5 @@
 import { CaseReport, HealthResponse } from '../types/case';
+import { BenchmarkMeta, BenchmarkRunSummary } from '../types/benchmark';
 
 /**
  * Base URL for the backend API, read from Vite environment variable VITE_API_URL.
@@ -298,6 +299,29 @@ export const api = {
    */
   getReportDownloadUrl: (caseId: string): string =>
     `${API_BASE_URL}/api/cases/${encodeURIComponent(caseId)}/report`,
+
+  /**
+   * List all saved benchmark runs.
+   * Calls GET /api/benchmarks
+   */
+  listBenchmarks: (): Promise<BenchmarkMeta[]> =>
+    fetchJson<BenchmarkMeta[]>('/api/benchmarks'),
+
+  /**
+   * Fetch full summary.json for a benchmark run.
+   * Calls GET /api/benchmarks/{run_id}
+   */
+  getBenchmark: (runId: string): Promise<BenchmarkRunSummary> =>
+    fetchJson<BenchmarkRunSummary>(`/api/benchmarks/${encodeURIComponent(runId)}`),
+
+  /**
+   * Run the 3-case synthetic phantom benchmark suite.
+   * Calls POST /api/benchmarks/run-phantom
+   */
+  runPhantomBenchmark: (): Promise<BenchmarkRunSummary> =>
+    fetchJson<BenchmarkRunSummary>('/api/benchmarks/run-phantom', {
+      method: 'POST',
+    }),
 
   /**
    * Utility to return the configured base URL.
