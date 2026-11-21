@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from fpdf import FPDF
 import numpy as np
 from PIL import Image, ImageDraw
+import scipy.ndimage
 import SimpleITK as sitk
 
 from app.models.schemas import CaseReport
@@ -28,9 +29,100 @@ from app.models.schemas import CaseReport
 logger = logging.getLogger("slicem.reporting")
 
 
+def clean_pdf_text(val: Any) -> str:
+    """Sanitize text for clean PDF generation.
+
+    Strips LaTeX commands, math delimiters, unwanted symbols, and normalizes
+    unit suffixes and underscores to clean clinical typography.
+    """
+    if val is None:
+        return ""
+    text = str(val)
+
+    # Unit conversions
+    text = text.replace("mm^3", "mm3").replace("cm^3", "cm3").replace("mm^2", "mm2")
+    text = text.replace("mm³", "mm3").replace("cm³", "cm3").replace("mm²", "mm2")
+
+    # Pipeline & step naming
+    text = text.replace("Mesh_and_analytics", "Mesh & Analytics")
+    text = text.replace("mesh_and_analytics", "Mesh & Analytics")
+    text = text.replace("mesh_generation", "Mesh Generation")
+    text = text.replace("motion_correction", "Motion Correction")
+    text = text.replace("geometry_verification", "Geometry Verification")
+
+    # LaTeX patterns and math delimiters
+    text = text.replace(r"\times", "x").replace(r"\text", "").replace(r"\pm", "+/-")
+    for ch in ("$", "^", "{", "}", "~"):
+        text = text.replace(ch, "")
+
+    # Hyphens & dashes
+    text = text.replace("—", "-").replace("–", "-")
+
+    # Replace internal underscores with spaces
+    text = text.replace("_", " ")
+
+    return text
+
+
+class AppleReportPDF(FPDF):
+    """Custom FPDF subclass that automatically sanitizes all cell text."""
+
+    def cell(
+        self,
+        w: float = 0,
+        h: float = 0,
+        text: str = "",
+        border: Any = 0,
+        align: str = "",
+        fill: bool = False,
+        link: str = "",
+        center: bool = False,
+        markdown: bool = False,
+        new_x: Any = "RIGHT",
+        new_y: Any = "TOP",
+    ):
+        return super().cell(
+            w=w,
+            h=h,
+            text=clean_pdf_text(text),
+            border=border,
+            align=align,
+            fill=fill,
+            link=link,
+            center=center,
+            markdown=markdown,
+            new_x=new_x,
+            new_y=new_y,
+        )
+
+    def multi_cell(
+        self,
+        w: float = 0,
+        h: float = 0,
+        text: str = "",
+        border: Any = 0,
+        align: str = "",
+        fill: bool = False,
+        markdown: bool = False,
+        new_x: Any = "RIGHT",
+        new_y: Any = "TOP",
+    ):
+        return super().multi_cell(
+            w=w,
+            h=h,
+            text=clean_pdf_text(text),
+            border=border,
+            align=align,
+            fill=fill,
+            markdown=markdown,
+            new_x=new_x,
+            new_y=new_y,
+        )
+
+
 def _humanize_structure_name(name: str) -> str:
     """Format anatomical structure identifier into clean title case."""
-    return name.replace("_", " ").strip().title()
+    return clean_pdf_text(name).title()
 
 
 def _humanize_engine_name(engine: Optional[str]) -> str:
@@ -44,7 +136,7 @@ def _humanize_engine_name(engine: Optional[str]) -> str:
         "totalsegmentator_full": "TotalSegmentator (Full)",
         "nnunet_custom": "nnU-Net Custom (ACDC)",
     }
-    return mapping.get(engine, engine.replace("_", " ").title())
+    return mapping.get(engine, clean_pdf_text(engine).title())
 
 
 def _render_orthogonal_composite(
@@ -54,8 +146,8 @@ def _render_orthogonal_composite(
 ) -> Tuple[Optional[bytes], Tuple[int, int, int]]:
     """Generate a clean 3-panel orthogonal composite (Axial, Coronal, Sagittal) as PNG bytes.
 
-    Renders scans with cyan segmentation contours and subtle light borders without
-    drawing heavy overlapping boxes over the scan anatomy.
+    Renders scans with subtle semi-transparent overlays (thin boundary outline + light 20% tint)
+    and delicate light borders, preserving clear visibility of underlying CT anatomy.
 
     Returns:
         Tuple of (png_bytes, (mid_z, mid_y, mid_x)).
@@ -115,9 +207,13 @@ def _render_orthogonal_composite(
         rgb = np.stack([gray, gray, gray], axis=-1)
 
         if mask_2d is not None and np.any(mask_2d > 0):
-            cyan = np.array([10, 132, 255], dtype=np.uint8)  # Apple System Blue overlay
+            cyan = np.array([10, 132, 255], dtype=np.uint8)  # Apple System Blue
             fg = mask_2d > 0
-            rgb[fg] = (0.55 * rgb[fg] + 0.45 * cyan).astype(np.uint8)
+            # Subtle semi-transparent 20% tint for interior so underlying bone trabeculae are visible
+            rgb[fg] = (0.80 * rgb[fg] + 0.20 * cyan).astype(np.uint8)
+            # Thin boundary contour outline (85% cyan)
+            boundary = fg & ~scipy.ndimage.binary_erosion(fg, iterations=1)
+            rgb[boundary] = (0.15 * rgb[boundary] + 0.85 * cyan).astype(np.uint8)
 
         img = Image.fromarray(rgb)
         img = img.resize((panel_width, panel_height), Image.Resampling.BILINEAR)
@@ -146,7 +242,7 @@ def _render_orthogonal_composite(
     img_coronal = make_panel(cor_slice, cor_mask_flip)
     img_sagittal = make_panel(sag_slice, sag_mask_flip)
 
-    gap = 8
+    gap = 6
     total_w = panel_width * 3 + gap * 2
     comp = Image.new("RGB", (total_w, panel_height), color=(255, 255, 255))
     comp.paste(img_axial, (0, 0))
@@ -164,7 +260,7 @@ def generate_case_pdf(case_dir: Path) -> bytes:
     Styled after Apple native Health/Pro clinical interface:
     - Pure white page with subtle light-gray cards and hairline dividers.
     - Accurate telemetry indicators with humanized labels.
-    - 3-panel multi-planar slice inspection strip.
+    - 3-panel multi-planar slice inspection strip with side-by-side captions.
     - Right-aligned tabular anatomical structure metrics.
     - Strictly fits on 1 single A4 page.
 
@@ -183,8 +279,8 @@ def generate_case_pdf(case_dir: Path) -> bytes:
 
     report = CaseReport.model_validate(report_data)
 
-    # Initialize A4 Portrait document (210 x 297 mm)
-    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    # Initialize A4 Portrait document (210 x 297 mm) with AppleReportPDF
+    pdf = AppleReportPDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(False)
     pdf.set_margins(14, 12, 14)
     pdf.add_page()
@@ -274,7 +370,7 @@ def generate_case_pdf(case_dir: Path) -> bytes:
     kpis = [
         ("MODALITY & SLICES", f"{report.scan.modality} | {report.scan.slice_count} slices"),
         ("GANTRY DETECTOR TILT", tilt_val),
-        ("ISOTROPIC VOXEL GRID", f"{report.geometry.isotropic_spacing_mm or 1.0:.2f} mm^3"),
+        ("ISOTROPIC VOXEL GRID", f"{report.geometry.isotropic_spacing_mm or 1.0:.2f} mm3"),
         ("PIPELINE RUNTIME", f"{total_time:.2f} s"),
     ]
 
@@ -321,12 +417,15 @@ def generate_case_pdf(case_dir: Path) -> bytes:
         else "Variable (Non-equidistant)"
     )
 
+    missing_count = len(report.geometry.missing_slice_indices)
+    missing_slice_label = f"{missing_count} detected ({'Continuous' if missing_count == 0 else 'Gaps present'})"
+
     geom_items = [
         ("In-Plane Pixel Spacing", f"{report.scan.pixel_spacing_mm[0]:.2f} x {report.scan.pixel_spacing_mm[1]:.2f} mm"),
         ("Measured vs Declared Z", f"{report.geometry.measured_spacing_mm or 0.0:.2f} mm (decl. {report.scan.declared_thickness_mm or 0.0:.2f} mm)"),
         ("Slice Spacing Mismatch", spacing_mismatch_label),
         ("Patient Slice Ordering", "IPP projection sorted" if report.geometry.slices_reordered else "Monotonic (Preserved)"),
-        ("Missing Slice Gaps", f"{len(report.geometry.missing_slice_indices)} detected" if report.geometry.missing_slice_indices else "0 detected (Continuous)"),
+        ("Missing Slice Gaps", missing_slice_label),
         ("Geometry Verification Status", report.geometry.status),
     ]
 
@@ -407,24 +506,25 @@ def generate_case_pdf(case_dir: Path) -> bytes:
         try:
             pdf.image(comp_bytes, x=MARGIN, y=img_y, w=CONTENT_WIDTH, h=img_h)
 
-            # Minimal slice position labels placed below each panel
+            # Minimal slice position labels placed directly below each panel
             label_y = img_y + img_h + 1.2
-            panel_w = (CONTENT_WIDTH - 8.0) / 3.0
+            panel_mm_w = CONTENT_WIDTH * (240.0 / 732.0)  # ~59.67 mm per panel
+            gap_mm = CONTENT_WIDTH * (6.0 / 732.0)        # ~1.49 mm gap
 
             slice_labels = [
-                f"Axial | Slice {mid_z}",
-                f"Coronal | Slice {mid_y}",
-                f"Sagittal | Slice {mid_x}",
+                f"Axial · Slice {mid_z}",
+                f"Coronal · Slice {mid_y}",
+                f"Sagittal · Slice {mid_x}",
             ]
             pdf.set_text_color(*C_MUTED)
             pdf.set_font("Helvetica", "", 6.8)
 
             for p_idx, s_label in enumerate(slice_labels):
-                px = MARGIN + p_idx * (panel_w + 4.0)
+                px = MARGIN + p_idx * (panel_mm_w + gap_mm)
                 pdf.set_xy(px, label_y)
-                pdf.cell(panel_w, 3.5, s_label, align="C")
+                pdf.cell(panel_mm_w, 3.5, s_label, align="C")
 
-            curr_y = label_y + 5.0
+            curr_y = label_y + 4.5
         except Exception as e:
             logger.warning("Failed to embed composite image in PDF: %s", e)
             curr_y = img_y + 4.0
@@ -457,8 +557,8 @@ def generate_case_pdf(case_dir: Path) -> bytes:
     # Columns (Total: 182.0 mm)
     cols = [
         ("Structure", 42.0, "L"),
-        ("Volume (cm^3)", 24.0, "R"),
-        ("Surface Area (mm^2)", 28.0, "R"),
+        ("Volume (cm3)", 24.0, "R"),
+        ("Surface Area (mm2)", 28.0, "R"),
         ("Mean Thk (mm)", 26.0, "R"),
         ("Intensity (HU)", 26.0, "R"),
         ("Watertight", 18.0, "C"),
@@ -532,8 +632,8 @@ def generate_case_pdf(case_dir: Path) -> bytes:
     pdf.set_text_color(*C_MUTED)
     pdf.set_font("Helvetica", "", 6.5)
 
-    timings_str = "  |  ".join([f"{k.capitalize()}: {v:.2f}s" for k, v in report.stage_timings_sec.items()]) if report.stage_timings_sec else f"Total: {total_time:.2f}s"
-    pdf.cell(CONTENT_WIDTH, 3.5, f"Pipeline Execution  |  Total: {total_time:.2f}s  |  {timings_str}", align="L")
+    timings_str = "  ·  ".join([f"{k.capitalize()}: {v:.2f}s" for k, v in report.stage_timings_sec.items()]) if report.stage_timings_sec else f"Total: {total_time:.2f}s"
+    pdf.cell(CONTENT_WIDTH, 3.5, f"Pipeline Execution  ·  Total: {total_time:.2f}s  ·  {timings_str}", align="L")
 
     # Divider line
     pdf.set_draw_color(*C_BORDER)
