@@ -228,10 +228,18 @@ def analyze_dicom_series(
         measured_spacing_mm = None
 
     first_slice = sorted_slices[0]
+    declared_thicknesses = [s.declared_thickness for s in sorted_slices if s.declared_thickness is not None]
+    unique_declared = set(round(t, 2) for t in declared_thicknesses) if declared_thicknesses else set()
+    has_varying_thickness = len(unique_declared) > 1
+
     declared_thickness_mm = first_slice.declared_thickness
     spacing_mismatch_mm: Optional[float] = None
 
-    if measured_spacing_mm is not None and declared_thickness_mm is not None:
+    if has_varying_thickness:
+        warnings.append(
+            "Variable slice spacing detected (non-equidistant acquisition); interpolated to isotropic grid."
+        )
+    elif measured_spacing_mm is not None and declared_thickness_mm is not None:
         spacing_mismatch_mm = round(float(abs(measured_spacing_mm - declared_thickness_mm)), 4)
         if spacing_mismatch_mm > 0.05:
             warnings.append(
@@ -244,11 +252,20 @@ def analyze_dicom_series(
     missing_slice_indices: List[int] = []
     if len(gaps) > 0 and measured_spacing_mm is not None and measured_spacing_mm > 1e-4:
         for idx, gap in enumerate(gaps):
-            if abs(gap) > 1.5 * measured_spacing_mm:
+            gap_mag = abs(gap)
+            t1 = sorted_slices[idx].declared_thickness
+            t2 = sorted_slices[idx + 1].declared_thickness
+
+            if has_varying_thickness and t1 is not None and t2 is not None:
+                expected_local = max(t1, t2)
+            else:
+                expected_local = measured_spacing_mm
+
+            if gap_mag > 1.5 * expected_local:
                 missing_slice_indices.append(idx)
                 warnings.append(
                     f"Missing slice gap detected between slice {idx} and {idx + 1} "
-                    f"(physical gap {abs(gap):.3f} mm exceeds 1.5x measured spacing {measured_spacing_mm:.3f} mm)."
+                    f"(physical gap {gap_mag:.3f} mm exceeds 1.5x expected local spacing {expected_local:.3f} mm)."
                 )
 
     # ─── 4. Geometric Gantry Tilt Detection ───────────────────────────────────

@@ -51,6 +51,7 @@ DEFAULT_STRUCTURE_COLORS: List[str] = [
 def cleanup_and_check_topology(
     label_img: sitk.Image,
     label_names: Dict[int, str],
+    keep_single_largest: bool = False,
 ) -> Tuple[sitk.Image, Dict[int, Dict[str, Any]], List[str]]:
     """Clean up discrete label masks and audit topological connectivity.
 
@@ -58,11 +59,15 @@ def cleanup_and_check_topology(
     - Analyzes connected components.
     - Removes tiny stray noise islands (< 1% of total structure volume or < 20 voxels)
       while preserving the primary component and non-stray components.
+    - When keep_single_largest=True (or for bone/skull structures), strictly preserves
+      only the single largest connected component, eliminating detached fixtures like
+      CT scanner headrests or table holders.
     - Flags empty structures or fragmented structures with > 1 disconnected component.
 
     Args:
         label_img: Discrete integer multi-label 3D SimpleITK image.
         label_names: Mapping of integer label ID to structure name.
+        keep_single_largest: If True, keep only the largest connected component.
 
     Returns:
         Tuple of (cleaned_label_image, per_label_topology_meta, warnings_list).
@@ -104,11 +109,16 @@ def cleanup_and_check_topology(
         # Stray threshold: remove islands < 1% of structure volume or < 20 voxels
         stray_threshold = max(20, int(0.01 * total_voxels))
 
-        # Keep primary component (index 1) always, and secondary components >= threshold
+        # For ct_bone_threshold / skull segmentation or when keep_single_largest is True,
+        # keep ONLY the single largest connected component (the skull/skeleton),
+        # completely removing detached CT table/headrest fixtures.
+        is_bone_mode = keep_single_largest or name.lower() in ("skull_bone", "ct_bone")
+
+        # Keep primary component (index 1) always, and secondary components >= threshold (unless bone mode)
         kept_mask = sitk.Image(bin_img.GetSize(), sitk.sitkUInt8)
         kept_mask.CopyInformation(bin_img)
         for idx, sz in enumerate(sizes, 1):
-            if idx == 1 or sz >= stray_threshold:
+            if idx == 1 or (not is_bone_mode and sz >= stray_threshold):
                 comp = sitk.Equal(rel_img, idx)
                 comp.CopyInformation(bin_img)
                 kept_mask.CopyInformation(bin_img)
@@ -349,6 +359,7 @@ def run_segmentation(
     cleaned_label_img, topology_meta, topology_warnings = cleanup_and_check_topology(
         raw_label_img,
         label_names,
+        keep_single_largest=(engine == "ct_bone_threshold"),
     )
     cleaned_label_img.CopyInformation(raw_label_img)
 

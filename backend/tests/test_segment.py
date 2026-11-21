@@ -313,8 +313,10 @@ def test_ct_bone_threshold_and_boundary_capping(tmp_path: Path):
 
     # 1. Create a 30x32x32 CT volume with a skull bone slab touching top and bottom boundaries (z=0 and z=29)
     vol_arr = np.full((30, 32, 32), -1000.0, dtype=np.float32)
-    # Bone slab (> 300 HU, e.g. 700 HU) touching z boundaries
+    # Main skull bone slab (> 300 HU, e.g. 700 HU, 16x16x30 = 7,680 voxels) touching z boundaries
     vol_arr[:, 8:24, 8:24] = 700.0
+    # Detached CT headrest/table fixture (> 300 HU, e.g. 600 HU, 4x4x30 = 480 voxels)
+    vol_arr[:, 26:30, 26:30] = 600.0
     # Soft tissue island (< 300 HU, e.g. 50 HU) that should be excluded
     vol_arr[:, 0:6, 0:6] = 50.0
 
@@ -374,6 +376,11 @@ def test_ct_bone_threshold_and_boundary_capping(tmp_path: Path):
     assert len(seg_report.structures) == 1
     assert seg_report.structures[0].name == "skull_bone"
     assert seg_report.structures[0].intensity_mean > 650.0
+    assert seg_report.structures[0].topology_components == 1
+
+    # Check that detached CT headrest region is completely removed (0 in cleaned labels)
+    labels_arr = sitk.GetArrayViewFromImage(sitk.ReadImage(str(case_dir / "labels.nii.gz")))
+    assert np.all(labels_arr[:, 26:30, 26:30] == 0), "Detached CT headrest must be completely removed"
 
     # 3. Generate 3D surface meshes and verify watertight boundary capping
     from app.core.mesh import generate_structure_meshes

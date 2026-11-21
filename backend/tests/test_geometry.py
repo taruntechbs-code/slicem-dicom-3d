@@ -224,3 +224,59 @@ def test_zip_upload_ignores_macosx_metadata(tmp_path: Path):
     # Must only parse the 3 real DICOM slices
     assert data["scan"]["slice_count"] == 3
     assert data["geometry"]["status"] in ("PASS", "WARN")
+
+
+def test_variable_spacing_ct_detection(tmp_path: Path):
+    """Test 5: Verify variable slice thickness CT detection (non-equidistant zones like 4mm base, 8mm vertex)."""
+    raw_dir = tmp_path / "raw_var"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    case_dir = tmp_path / "case_var"
+
+    # Generate 6 synthetic DICOM slices with two thickness zones: 4.0mm and 8.0mm
+    import pydicom
+    from pydicom.dataset import FileDataset, FileMetaDataset
+    from pydicom.uid import ExplicitVRLittleEndian, generate_uid
+    from pydicom.datadict import tag_for_keyword
+
+    z_positions = [0.0, 4.0, 8.0, 16.0, 24.0, 32.0]
+    thicknesses = [4.0, 4.0, 4.0, 8.0, 8.0, 8.0]
+
+    for idx, (z, thick) in enumerate(zip(z_positions, thicknesses)):
+        file_meta = FileMetaDataset()
+        file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+        file_meta.MediaStorageSOPInstanceUID = generate_uid()
+        file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+        ds = FileDataset(str(raw_dir / f"slice_{idx:02d}.dcm"), {}, file_meta=file_meta, preamble=b"\0" * 128)
+        ds.Modality = "CT"
+        ds.PatientID = "VAR-CT-001"
+        ds.StudyInstanceUID = generate_uid()
+        ds.SeriesInstanceUID = generate_uid()
+        ds.SOPInstanceUID = file_meta.MediaStorageSOPInstanceUID
+        ds.SOPClassUID = file_meta.MediaStorageSOPClassUID
+        ds.ImagePositionPatient = [0.0, 0.0, float(z)]
+        ds.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        ds.PixelSpacing = [1.0, 1.0]
+        ds.SliceThickness = float(thick)
+        ds.Rows = 16
+        ds.Columns = 16
+        ds.BitsAllocated = 16
+        ds.BitsStored = 16
+        ds.HighBit = 15
+        ds.PixelRepresentation = 0
+        ds.SamplesPerPixel = 1
+        ds.PhotometricInterpretation = "MONOCHROME2"
+        ds.RescaleSlope = 1.0
+        ds.RescaleIntercept = -1000.0
+        ds.PixelData = np.zeros((16, 16), dtype=np.uint16).tobytes()
+
+        ds.save_as(str(raw_dir / f"slice_{idx:02d}.dcm"), enforce_file_format=True)
+
+    report = analyze_dicom_series(raw_dir, case_dir, "CASE-VARIABLE-SPACING")
+
+    # 0 missing slices should be reported despite non-equidistant spacing
+    assert len(report.geometry.missing_slice_indices) == 0
+    # Informative warning must be present
+    all_warnings = " ".join(report.geometry.warnings)
+    assert "Variable slice spacing detected" in all_warnings
+    assert report.geometry.status == "WARN"
