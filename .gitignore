@@ -1,0 +1,47 @@
+# Environments & Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node & Frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+.npm/
+
+# Runtime Workspace & Case Data
+workspace/
+!workspace/.gitkeep
+
+# Operating System & IDEs
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Medical Imaging & Weights & Meshes (gitignored to prevent large binary bloat)
+*.dcm
+*.nii
+*.nii.gz
+*.stl
+*.obj
+*.glb
+*.pth
+*.pt
+*.bin
+*.onnx
