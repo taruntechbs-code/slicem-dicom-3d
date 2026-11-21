@@ -91,6 +91,12 @@ def analyze_dicom_series(
     case_dir = Path(case_dir)
     case_dir.mkdir(parents=True, exist_ok=True)
 
+    # If synthetic phantom truth file exists in dicom_dir, preserve it in case_dir
+    phantom_truth_src = dicom_dir / "phantom_truth.json"
+    if phantom_truth_src.is_file():
+        import shutil
+        shutil.copy2(phantom_truth_src, case_dir / "phantom_truth.json")
+
     warnings: List[str] = []
 
     # Find all .dcm files (or files without extension that are valid DICOM)

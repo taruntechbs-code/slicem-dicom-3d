@@ -180,6 +180,15 @@ def test_api_segmentation_and_overlay(tmp_path: Path, monkeypatch: pytest.Monkey
     assert ov_cor.status_code == 200
     assert ov_cor.headers["content-type"] == "image/png"
 
+    # Verify out-of-bounds slice indices are safely clamped without throwing 400
+    ov_out_of_bounds = client.get(f"/api/cases/{case_id}/overlay/axial/9999")
+    assert ov_out_of_bounds.status_code == 200
+    assert ov_out_of_bounds.headers["content-type"] == "image/png"
+
+    slice_out_of_bounds = client.get(f"/api/cases/{case_id}/slice/corrected/coronal/9999")
+    assert slice_out_of_bounds.status_code == 200
+    assert slice_out_of_bounds.headers["content-type"] == "image/png"
+
 
 def test_segmentation_with_clinical_nonzero_origin(tmp_path: Path):
     """Regression test for clinical DICOM scans with non-zero physical origin and spacing.
@@ -276,6 +285,7 @@ def test_segmentation_with_clinical_nonzero_origin(tmp_path: Path):
     result_report = run_segmentation(case_dir, engine="phantom_threshold")
     assert result_report.segmentation.status == "PASS"
     assert len(result_report.structures) == 1
+    assert result_report.structures[0].name == "tissue_volume"
 
     # Verify saved labels.nii.gz preserved exact origin and spacing
     saved_labels = sitk.ReadImage(str(case_dir / "labels.nii.gz"))

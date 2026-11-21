@@ -143,12 +143,13 @@ def cleanup_and_check_topology(
 def _segment_phantom_threshold(
     volume_img: sitk.Image,
     modality: str,
+    is_synthetic_phantom: bool = True,
 ) -> Tuple[sitk.Image, Dict[int, str]]:
-    """Segment synthetic phantom structures via deterministic HU thresholding."""
+    """Segment synthetic phantom or clinical foreground structures via deterministic HU/intensity thresholding."""
     vol_arr = sitk.GetArrayViewFromImage(volume_img)
 
     if modality == "CT":
-        # Phantom sphere is +400 HU, background is -1000 HU
+        # Phantom sphere / soft tissue foreground is > -200 HU, background air is -1000 HU
         mask = vol_arr > -200.0
     else:
         # MRI intensity threshold
@@ -160,7 +161,8 @@ def _segment_phantom_threshold(
 
     label_img = sitk.GetImageFromArray(label_arr)
     label_img.CopyInformation(volume_img)
-    label_names = {1: "phantom_sphere"}
+    label_name = "phantom_sphere" if is_synthetic_phantom else "tissue_volume"
+    label_names = {1: label_name}
 
     return label_img, label_names
 
@@ -288,7 +290,15 @@ def run_segmentation(
 
     if engine == "phantom_threshold":
         volume_img = sitk.ReadImage(str(vol_path))
-        raw_label_img, label_names = _segment_phantom_threshold(volume_img, report.scan.modality)
+        is_synthetic = (
+            (case_dir / "raw_dicom" / "phantom_truth.json").is_file()
+            or (case_dir / "phantom_truth.json").is_file()
+            or (case_dir.parent / "raw" / "phantom_truth.json").is_file()
+            or "phantom" in report.case_id.lower()
+        )
+        raw_label_img, label_names = _segment_phantom_threshold(
+            volume_img, report.scan.modality, is_synthetic_phantom=is_synthetic
+        )
     elif engine in ("totalsegmentator_fast", "totalsegmentator_full"):
         fast_mode = engine == "totalsegmentator_fast"
         raw_label_img, label_names = _segment_totalsegmentator(

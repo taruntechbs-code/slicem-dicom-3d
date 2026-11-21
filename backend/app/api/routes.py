@@ -386,30 +386,18 @@ def get_orthogonal_slice(case_id: str, stage: str, axis: str, index: int) -> Res
     # Array shape is (Z, Y, X) -> Z=axial, Y=coronal, X=sagittal
     if axis_norm == "axial":
         total_slices = vol.shape[0]
-        if index < 0 or index >= total_slices:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Index {index} out of bounds for axial axis (0 to {total_slices - 1})",
-            )
-        slice_2d = vol[index, :, :]
+        safe_idx = max(0, min(index, total_slices - 1)) if total_slices > 0 else 0
+        slice_2d = vol[safe_idx, :, :]
     elif axis_norm == "coronal":
         total_slices = vol.shape[1]
-        if index < 0 or index >= total_slices:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Index {index} out of bounds for coronal axis (0 to {total_slices - 1})",
-            )
+        safe_idx = max(0, min(index, total_slices - 1)) if total_slices > 0 else 0
         # Flip vertically so superior (high Z) is top
-        slice_2d = np.flipud(vol[:, index, :])
+        slice_2d = np.flipud(vol[:, safe_idx, :])
     else:  # sagittal
         total_slices = vol.shape[2]
-        if index < 0 or index >= total_slices:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Index {index} out of bounds for sagittal axis (0 to {total_slices - 1})",
-            )
+        safe_idx = max(0, min(index, total_slices - 1)) if total_slices > 0 else 0
         # Flip vertically so superior (high Z) is top
-        slice_2d = np.flipud(vol[:, :, index])
+        slice_2d = np.flipud(vol[:, :, safe_idx])
 
     png_bytes = _window_to_png(slice_2d)
 
@@ -636,28 +624,16 @@ def get_overlay_slice(
     # 2. Extract slice along requested anatomical plane
     if axis_norm == "axial":
         total_slices = vol.shape[0]
-        if index < 0 or index >= total_slices:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Index {index} out of bounds for axial axis (0 to {total_slices - 1})",
-            )
-        slice_vol = vol[index, :, :]
+        safe_idx = max(0, min(index, total_slices - 1)) if total_slices > 0 else 0
+        slice_vol = vol[safe_idx, :, :]
     elif axis_norm == "coronal":
         total_slices = vol.shape[1]
-        if index < 0 or index >= total_slices:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Index {index} out of bounds for coronal axis (0 to {total_slices - 1})",
-            )
-        slice_vol = np.flipud(vol[:, index, :])
+        safe_idx = max(0, min(index, total_slices - 1)) if total_slices > 0 else 0
+        slice_vol = np.flipud(vol[:, safe_idx, :])
     else:  # sagittal
         total_slices = vol.shape[2]
-        if index < 0 or index >= total_slices:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Index {index} out of bounds for sagittal axis (0 to {total_slices - 1})",
-            )
-        slice_vol = np.flipud(vol[:, :, index])
+        safe_idx = max(0, min(index, total_slices - 1)) if total_slices > 0 else 0
+        slice_vol = np.flipud(vol[:, :, safe_idx])
 
     # 3. Normalize grayscale background into 3-channel RGB [0, 255]
     if np.min(slice_vol) < -500:
@@ -679,12 +655,12 @@ def get_overlay_slice(
         lbl_img = sitk.ReadImage(str(labels_path))
         lbl_vol = sitk.GetArrayFromImage(lbl_img)
 
-        if axis_norm == "axial" and index < lbl_vol.shape[0]:
-            slice_lbl = lbl_vol[index, :, :]
-        elif axis_norm == "coronal" and index < lbl_vol.shape[1]:
-            slice_lbl = np.flipud(lbl_vol[:, index, :])
-        elif axis_norm == "sagittal" and index < lbl_vol.shape[2]:
-            slice_lbl = np.flipud(lbl_vol[:, :, index])
+        if axis_norm == "axial" and safe_idx < lbl_vol.shape[0]:
+            slice_lbl = lbl_vol[safe_idx, :, :]
+        elif axis_norm == "coronal" and safe_idx < lbl_vol.shape[1]:
+            slice_lbl = np.flipud(lbl_vol[:, safe_idx, :])
+        elif axis_norm == "sagittal" and safe_idx < lbl_vol.shape[2]:
+            slice_lbl = np.flipud(lbl_vol[:, :, safe_idx])
         else:
             slice_lbl = np.zeros(slice_vol.shape, dtype=np.uint16)
 

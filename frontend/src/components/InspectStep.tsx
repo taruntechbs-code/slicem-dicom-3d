@@ -86,9 +86,18 @@ export const InspectStep: React.FC<InspectStepProps> = ({
         api.fetchOverlaySliceCount(activeCase.case_id, 'sagittal'),
       ]);
       if (active) {
-        if (ax > 0) setAxialCount(ax);
-        if (cor > 0) setCoronalCount(cor);
-        if (sag > 0) setSagittalCount(sag);
+        if (ax > 0) {
+          setAxialCount(ax);
+          setAxialIndex(Math.floor(ax / 2));
+        }
+        if (cor > 0) {
+          setCoronalCount(cor);
+          setCoronalIndex(Math.floor(cor / 2));
+        }
+        if (sag > 0) {
+          setSagittalCount(sag);
+          setSagittalIndex(Math.floor(sag / 2));
+        }
       }
     };
     fetchCounts();
@@ -232,7 +241,13 @@ export const InspectStep: React.FC<InspectStepProps> = ({
               </div>
               <div className="aspect-square bg-black rounded-xl overflow-hidden border border-white/[0.04] flex items-center justify-center">
                 <img
-                  src={api.getOverlaySliceUrl(activeCase.case_id, 'axial', axialIndex, 0.45, visibleIdsList)}
+                  src={api.getOverlaySliceUrl(
+                    activeCase.case_id,
+                    'axial',
+                    Math.max(0, Math.min(axialIndex, axialCount - 1)),
+                    0.45,
+                    visibleIdsList
+                  )}
                   alt="Axial slice"
                   className="w-full h-full object-contain select-none"
                 />
@@ -257,7 +272,13 @@ export const InspectStep: React.FC<InspectStepProps> = ({
               </div>
               <div className="aspect-square bg-black rounded-xl overflow-hidden border border-white/[0.04] flex items-center justify-center">
                 <img
-                  src={api.getOverlaySliceUrl(activeCase.case_id, 'coronal', coronalIndex, 0.45, visibleIdsList)}
+                  src={api.getOverlaySliceUrl(
+                    activeCase.case_id,
+                    'coronal',
+                    Math.max(0, Math.min(coronalIndex, coronalCount - 1)),
+                    0.45,
+                    visibleIdsList
+                  )}
                   alt="Coronal slice"
                   className="w-full h-full object-contain select-none"
                 />
@@ -282,7 +303,13 @@ export const InspectStep: React.FC<InspectStepProps> = ({
               </div>
               <div className="aspect-square bg-black rounded-xl overflow-hidden border border-white/[0.04] flex items-center justify-center">
                 <img
-                  src={api.getOverlaySliceUrl(activeCase.case_id, 'sagittal', sagittalIndex, 0.45, visibleIdsList)}
+                  src={api.getOverlaySliceUrl(
+                    activeCase.case_id,
+                    'sagittal',
+                    Math.max(0, Math.min(sagittalIndex, sagittalCount - 1)),
+                    0.45,
+                    visibleIdsList
+                  )}
                   alt="Sagittal slice"
                   className="w-full h-full object-contain select-none"
                 />
@@ -441,12 +468,18 @@ export const InspectStep: React.FC<InspectStepProps> = ({
                 </div>
                 <span
                   className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
-                    selectedStructure.watertight
+                    selectedStructure.vertex_count === 0
+                      ? 'border-white/[0.08] text-[#86868B] bg-[#1C1C1E]'
+                      : selectedStructure.watertight
                       ? 'border-[#30D158]/30 text-[#30D158] bg-[#30D158]/10'
                       : 'border-[#FF9F0A]/30 text-[#FF9F0A] bg-[#FF9F0A]/10'
                   }`}
                 >
-                  {selectedStructure.watertight ? 'WATERTIGHT' : 'OPEN'}
+                  {selectedStructure.vertex_count === 0
+                    ? 'PENDING'
+                    : selectedStructure.watertight
+                    ? 'WATERTIGHT'
+                    : 'OPEN'}
                 </span>
               </div>
 
