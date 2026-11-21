@@ -1,56 +1,18 @@
 import React from 'react';
-import { UploadCloud, CheckCheck, RefreshCw, Cpu, Box } from 'lucide-react';
 
 export interface StepItem {
   id: number;
   key: 'load' | 'verify' | 'correct' | 'segment' | 'export';
   number: string;
   title: string;
-  subtitle: string;
-  icon: React.ReactNode;
 }
 
 export const STEPS: StepItem[] = [
-  {
-    id: 1,
-    key: 'load',
-    number: '01',
-    title: '1. Load',
-    subtitle: 'DICOM Ingestion',
-    icon: <UploadCloud className="w-4 h-4" />,
-  },
-  {
-    id: 2,
-    key: 'verify',
-    number: '02',
-    title: '2. Verify',
-    subtitle: 'Geometry & Spacing',
-    icon: <CheckCheck className="w-4 h-4" />,
-  },
-  {
-    id: 3,
-    key: 'correct',
-    number: '03',
-    title: '3. Correct',
-    subtitle: 'Motion SVR',
-    icon: <RefreshCw className="w-4 h-4" />,
-  },
-  {
-    id: 4,
-    key: 'segment',
-    number: '04',
-    title: '4. Segment',
-    subtitle: 'Anatomical AI',
-    icon: <Cpu className="w-4 h-4" />,
-  },
-  {
-    id: 5,
-    key: 'export',
-    number: '05',
-    title: '5. Inspect & Export',
-    subtitle: '3D Meshes & Metrics',
-    icon: <Box className="w-4 h-4" />,
-  },
+  { id: 1, key: 'load', number: '1', title: 'Load' },
+  { id: 2, key: 'verify', number: '2', title: 'Verify' },
+  { id: 3, key: 'correct', number: '3', title: 'Correct' },
+  { id: 4, key: 'segment', number: '4', title: 'Segment' },
+  { id: 5, key: 'export', number: '5', title: 'Inspect' },
 ];
 
 interface StepperProps {
@@ -61,67 +23,35 @@ interface StepperProps {
 export const Stepper: React.FC<StepperProps> = ({ currentStep, onSelectStep }) => {
   return (
     <nav aria-label="Pipeline Progress" className="w-full">
-      <ol className="grid grid-cols-1 md:grid-cols-5 gap-2 md:gap-0 bg-slate-900/60 p-2 rounded-xl border border-slate-800/80 backdrop-blur-sm">
-        {STEPS.map((step, index) => {
+      <div className="w-full bg-[#141416] p-1 rounded-full border border-white/[0.08] flex items-center justify-between gap-1">
+        {STEPS.map((step) => {
           const isActive = currentStep === step.id;
           const isCompleted = currentStep > step.id;
 
           return (
-            <li key={step.id} className="relative flex-1">
-              <button
-                type="button"
-                onClick={() => onSelectStep(step.id)}
-                className={`group w-full flex items-center p-3 rounded-lg text-left transition-all duration-200 outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
-                  isActive
-                    ? 'bg-slate-800/90 border border-cyan-500/40 shadow-lg shadow-cyan-950/20'
-                    : 'hover:bg-slate-800/40 border border-transparent'
-                }`}
-              >
-                {/* Step Icon Badge */}
-                <div
-                  className={`flex items-center justify-center w-8 h-8 rounded-lg text-xs font-mono font-semibold transition-all mr-3 shrink-0 ${
-                    isActive
-                      ? 'bg-cyan-500 text-slate-950 ring-4 ring-cyan-500/20'
-                      : isCompleted
-                        ? 'bg-emerald-950/80 border border-emerald-500/40 text-emerald-400'
-                        : 'bg-slate-800 text-slate-400 border border-slate-700/60 group-hover:text-slate-200'
-                  }`}
-                >
-                  {isCompleted ? <CheckCheck className="w-4 h-4" /> : step.icon}
-                </div>
-
-                {/* Step Metadata */}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className={`text-xs font-semibold tracking-wide truncate ${
-                        isActive ? 'text-white' : isCompleted ? 'text-slate-200' : 'text-slate-400'
-                      }`}
-                    >
-                      {step.title}
-                    </span>
-                  </div>
-                  <p
-                    className={`text-[11px] truncate mt-0.5 ${
-                      isActive ? 'text-cyan-300' : 'text-slate-500'
-                    }`}
-                  >
-                    {step.subtitle}
-                  </p>
-                </div>
-
-                {/* Horizontal Chevron Connector on Desktop */}
-                {index < STEPS.length - 1 && (
-                  <div
-                    aria-hidden="true"
-                    className="hidden md:block absolute right-0 top-1/2 -translate-y-1/2 w-px h-6 bg-slate-800 pointer-events-none"
-                  />
-                )}
-              </button>
-            </li>
+            <button
+              key={step.id}
+              type="button"
+              onClick={() => onSelectStep(step.id)}
+              className={`flex-1 py-1.5 px-3 rounded-full text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 outline-none ${
+                isActive
+                  ? 'bg-[#2C2C2E] text-[#F5F5F7] shadow-sm'
+                  : isCompleted
+                  ? 'text-[#86868B] hover:text-[#F5F5F7]'
+                  : 'text-[#86868B]/60 hover:text-[#86868B]'
+              }`}
+            >
+              {isCompleted && (
+                <span className="w-1.5 h-1.5 rounded-full bg-[#30D158] shrink-0" />
+              )}
+              <span className="tabular-nums font-medium text-[11px] opacity-70">
+                {step.number}
+              </span>
+              <span className="tracking-tight">{step.title}</span>
+            </button>
           );
         })}
-      </ol>
+      </div>
     </nav>
   );
 };

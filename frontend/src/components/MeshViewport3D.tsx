@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { Maximize2, RefreshCw } from 'lucide-react';
+import { Maximize2, Loader2 } from 'lucide-react';
 import { StructureReport } from '../types/case';
 import { api } from '../lib/api';
 
@@ -51,7 +51,7 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
     const maxDim = Math.max(size.x, size.y, size.z, 20.0);
 
     const fov = cameraRef.current.fov * (Math.PI / 180);
-    const cameraDistance = (maxDim / 2) / Math.tan(fov / 2) * 1.8;
+    const cameraDistance = ((maxDim / 2) / Math.tan(fov / 2)) * 1.8;
 
     const newPos = new THREE.Vector3(
       center.x + cameraDistance * 0.7,
@@ -90,7 +90,7 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
 
     // Scene
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x020617); // slate-950
+    scene.background = new THREE.Color(0x000000); // Apple Canvas Black
     sceneRef.current = scene;
 
     // Camera
@@ -115,23 +115,23 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
     controlsRef.current = controls;
 
     // Studio Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     scene.add(ambientLight);
 
     const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.9);
     dirLight1.position.set(120, 200, 150);
     scene.add(dirLight1);
 
-    const dirLight2 = new THREE.DirectionalLight(0x94a3b8, 0.5);
+    const dirLight2 = new THREE.DirectionalLight(0x86868b, 0.4);
     dirLight2.position.set(-120, -100, -150);
     scene.add(dirLight2);
 
-    const topLight = new THREE.DirectionalLight(0x38bdf8, 0.3);
+    const topLight = new THREE.DirectionalLight(0x0a84ff, 0.25);
     topLight.position.set(0, 250, 0);
     scene.add(topLight);
 
     // Subtle orientation grid
-    const grid = new THREE.GridHelper(200, 20, 0x1e293b, 0x0f172a);
+    const grid = new THREE.GridHelper(200, 20, 0x1c1c1e, 0x141416);
     grid.position.y = -40;
     scene.add(grid);
 
@@ -204,7 +204,6 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
     if (!sceneRef.current || !meshesGroupRef.current) return;
 
     const meshesGroup = meshesGroupRef.current;
-    // Clear previously loaded meshes
     while (meshesGroup.children.length > 0) {
       meshesGroup.remove(meshesGroup.children[0]);
     }
@@ -230,13 +229,11 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
           const rootObj = gltf.scene;
           rootObj.userData = { structureId: st.id, name: st.name };
 
-          // Traverse and tag materials
           rootObj.traverse((child) => {
             if ((child as THREE.Mesh).isMesh) {
               const mesh = child as THREE.Mesh;
               child.userData = { structureId: st.id };
               if (mesh.material) {
-                // Clone material so individual opacities and wireframe don't cross-contaminate
                 const mat = (mesh.material as THREE.Material).clone() as THREE.MeshStandardMaterial;
                 mat.transparent = true;
                 mat.roughness = 0.35;
@@ -286,10 +283,9 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
             mat.opacity = isVisible ? opacity : 0.0;
             mat.transparent = opacity < 0.99;
 
-            // Highlight selected structure
             if (isSelected) {
-              mat.emissive = new THREE.Color(0x38bdf8);
-              mat.emissiveIntensity = 0.35;
+              mat.emissive = new THREE.Color(0x0a84ff);
+              mat.emissiveIntensity = 0.4;
             } else {
               mat.emissive = new THREE.Color(0x000000);
               mat.emissiveIntensity = 0.0;
@@ -301,44 +297,44 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
   }, [visibleStructures, structureOpacities, wireframe, selectedStructureId]);
 
   return (
-    <div className="relative w-full h-full min-h-[420px] rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center">
+    <div className="relative w-full h-full min-h-[420px] rounded-2xl overflow-hidden bg-black border border-white/[0.08] flex items-center justify-center">
       {/* Three.js canvas container */}
       <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
-      {/* Top Floating Controls */}
-      <div className="absolute top-3 right-3 flex items-center gap-1.5 z-10">
+      {/* Top Floating Frosted Controls */}
+      <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
         <button
           onClick={onToggleWireframe}
-          className={`px-2.5 py-1.5 rounded-lg border text-xs font-mono transition-colors flex items-center gap-1.5 shadow-md ${
+          className={`px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-xl transition-all duration-200 border ${
             wireframe
-              ? 'bg-cyan-600 text-white border-cyan-500'
-              : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 border-slate-700'
+              ? 'bg-[#0A84FF] text-white border-transparent shadow-sm'
+              : 'bg-[#1C1C1E]/80 hover:bg-[#2C2C2E] text-[#F5F5F7] border-white/[0.08]'
           }`}
-          title="Toggle Wireframe Tessellation"
+          title="Toggle Wireframe"
         >
-          <span>Wireframe</span>
+          Wireframe
         </button>
 
         <button
           onClick={resetCamera}
-          className="p-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white transition-colors shadow-md"
+          className="p-1.5 rounded-full bg-[#1C1C1E]/80 hover:bg-[#2C2C2E] border border-white/[0.08] text-[#F5F5F7] backdrop-blur-xl transition-all duration-200"
           title="Reset Camera Framing"
         >
-          <Maximize2 className="w-4 h-4" />
+          <Maximize2 className="w-3.5 h-3.5" />
         </button>
       </div>
 
       {/* Loading Overlay */}
       {isLoading && (
-        <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2 z-20 pointer-events-none">
-          <RefreshCw className="w-8 h-8 text-cyan-400 animate-spin" />
-          <span className="text-xs font-mono text-cyan-200">Streaming 3D GLTF Assets...</span>
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center gap-2 z-20 pointer-events-none">
+          <Loader2 className="w-6 h-6 text-[#0A84FF] animate-spin" />
+          <span className="text-xs font-medium text-[#86868B]">Loading 3D Models...</span>
         </div>
       )}
 
-      {/* HUD Watermark & Controls Help */}
-      <div className="absolute bottom-2 left-2 text-[10px] font-mono text-slate-500 pointer-events-none bg-slate-950/80 px-2 py-0.5 rounded border border-slate-800/80">
-        Left-Click: Rotate · Right-Click: Pan · Scroll: Zoom · Click Mesh: Select
+      {/* Minimal HUD Help */}
+      <div className="absolute bottom-2.5 left-3 text-[10px] text-[#86868B] pointer-events-none bg-[#141416]/80 backdrop-blur-md px-3 py-1 rounded-full border border-white/[0.08]">
+        Rotate · Pan · Zoom · Click to Inspect
       </div>
     </div>
   );
