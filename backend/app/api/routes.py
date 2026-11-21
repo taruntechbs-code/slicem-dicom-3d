@@ -17,7 +17,9 @@ from pydantic import BaseModel, Field
 import SimpleITK as sitk
 
 from app import config
+from app.core.analytics import compute_structure_analytics
 from app.core.geometry import analyze_dicom_series, correct_volume_geometry
+from app.core.mesh import generate_structure_meshes
 from app.core.motion import correct_slice_motion, inject_slice_motion
 from app.core.phantoms import generate_sphere_phantom
 from app.core.segment import DEFAULT_STRUCTURE_COLORS, run_segmentation
@@ -743,4 +745,130 @@ def get_overlay_slice(
             "Access-Control-Expose-Headers": "X-Slice-Count",
         },
     )
+
+
+# ─── Stop 5: 3D Mesh Generation, CAD Assets, & Case Bundle Export ─────────────
+
+
+class MeshGenerateRequest(BaseModel):
+    """Configuration payload for 3D isosurface smoothing, decimation, and asset export."""
+
+    smooth_iterations: int = Field(default=20, ge=1, le=100, description="Windowed-Sinc smoothing iterations")
+    pass_band: float = Field(default=0.1, ge=0.01, le=2.0, description="Windowed-Sinc passband filter frequency")
+    target_reduction: float = Field(default=0.5, ge=0.0, le=0.9, description="Target quadric decimation face reduction")
+    include_marching_cubes_baseline: bool = Field(default=False, description="Export unsmoothed Marching Cubes baseline")
+
+
+@router.post("/cases/{case_id}/mesh", response_model=CaseReport)
+def generate_meshes(
+    case_id: str,
+    req: MeshGenerateRequest = MeshGenerateRequest(),
+) -> CaseReport:
+    """Generate watertight 3D meshes (.stl, .obj, .glb) and compute physical cortical analytics."""
+    workspace = config.WORKSPACE_DIR
+    case_dir = workspace / case_id
+
+    if not case_dir.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case '{case_id}' not found",
+        )
+
+    labels_file = case_dir / "labels.nii.gz"
+    if not labels_file.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"No segmentation labels found for case '{case_id}'. Please run Stop 4 (Segment) first.",
+        )
+
+    try:
+        mesh_results = generate_structure_meshes(
+            case_dir=case_dir,
+            smooth_iterations=req.smooth_iterations,
+            pass_band=req.pass_band,
+            target_reduction=req.target_reduction,
+            include_marching_cubes_baseline=req.include_marching_cubes_baseline,
+        )
+        report = compute_structure_analytics(case_dir, mesh_results)
+        return report
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Mesh extraction / analytics failed: {exc}",
+        ) from exc
+
+
+@router.get("/cases/{case_id}/meshes/{filename}")
+def get_mesh_file(case_id: str, filename: str) -> Response:
+    """Serve generated 3D mesh assets (.glb, .stl, .obj) with path-traversal safeguards."""
+    workspace = config.WORKSPACE_DIR
+    case_dir = workspace / case_id
+    meshes_dir = (case_dir / "meshes").resolve()
+    target_file = (meshes_dir / filename).resolve()
+
+    if not meshes_dir.is_dir() or not target_file.is_file() or meshes_dir not in target_file.parents:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Mesh file '{filename}' not found for case '{case_id}'",
+        )
+
+    ext = target_file.suffix.lower()
+    media_types = {
+        ".glb": "model/gltf-binary",
+        ".stl": "application/octet-stream",
+        ".obj": "text/plain",
+    }
+    media_type = media_types.get(ext, "application/octet-stream")
+
+    return Response(
+        content=target_file.read_bytes(),
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@router.get("/cases/{case_id}/export/bundle")
+def export_case_bundle(case_id: str) -> Response:
+    """Stream a comprehensive case export archive containing report.json, labels, and 3D meshes."""
+    workspace = config.WORKSPACE_DIR
+    case_dir = workspace / case_id
+
+    if not case_dir.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case '{case_id}' not found",
+        )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # 1. report.json
+        rep = case_dir / "report.json"
+        if rep.is_file():
+            zf.write(rep, arcname=f"{case_id}/report.json")
+
+        # 2. labels.nii.gz & labels_meta.json
+        lbl = case_dir / "labels.nii.gz"
+        if lbl.is_file():
+            zf.write(lbl, arcname=f"{case_id}/labels.nii.gz")
+
+        lmeta = case_dir / "labels_meta.json"
+        if lmeta.is_file():
+            zf.write(lmeta, arcname=f"{case_id}/labels_meta.json")
+
+        # 3. Meshes
+        meshes_dir = case_dir / "meshes"
+        if meshes_dir.is_dir():
+            for m_file in meshes_dir.iterdir():
+                if m_file.is_file() and m_file.suffix.lower() in (".stl", ".obj", ".glb"):
+                    zf.write(m_file, arcname=f"{case_id}/meshes/{m_file.name}")
+
+    zip_bytes = buf.getvalue()
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{case_id}_bundle.zip"',
+        },
+    )
+
 

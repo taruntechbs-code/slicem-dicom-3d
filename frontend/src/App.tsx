@@ -25,6 +25,7 @@ import { api, PhantomParams } from './lib/api';
 import { CaseReport, HealthResponse } from './types/case';
 import { Stepper, STEPS } from './components/Stepper';
 import { StatusBadge } from './components/StatusBadge';
+import { InspectStep } from './components/InspectStep';
 
 // Fallback demo report for initial render before backend connects
 const FALLBACK_DEMO_CASE: CaseReport = {
@@ -261,7 +262,17 @@ export const App: React.FC = () => {
               onProceedToExport={() => setCurrentStep(5)}
             />
           )}
-          {currentStep === 5 && <ExportStepView activeCase={activeCase} />}
+          {currentStep === 5 && (
+            <InspectStep
+              activeCase={activeCase}
+              onCaseUpdated={(updated) => {
+                setActiveCase(updated);
+                setCases((prev) =>
+                  prev.map((c) => (c.case_id === updated.case_id ? updated : c))
+                );
+              }}
+            />
+          )}
 
           {/* Bottom Step Navigation Bar */}
           <div className="px-6 py-4 bg-slate-900/80 border-t border-slate-800 flex items-center justify-between">
@@ -2191,129 +2202,6 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>
-      </div>
-    </div>
-  );
-};
-
-/* ─── Step 5 Placeholder: Inspect & Export ──────────────────────────────── */
-const ExportStepView: React.FC<{ activeCase: CaseReport }> = ({ activeCase }) => {
-  return (
-    <div className="p-6 lg:p-8 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-5">
-        <div>
-          <span className="text-xs font-mono font-semibold uppercase tracking-wider text-cyan-400">
-            Stop 05 · Reconstruction & Export
-          </span>
-          <h3 className="text-xl font-bold text-white mt-1">3D Mesh Inspection & Quantitative Analytics</h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Watertight 2-manifold surface reconstruction, volumetric quantification, and multi-format CAD export.
-          </p>
-        </div>
-        <StatusBadge status={activeCase.status} />
-      </div>
-
-      {/* 3D Viewport Placeholder */}
-      <div className="relative h-64 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-center overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] opacity-40" />
-        <div className="relative z-10 flex flex-col items-center text-center px-4">
-          <Eye className="w-8 h-8 text-cyan-400 mb-2" />
-          <h4 className="text-sm font-semibold text-white">Three.js / WebGL 3D Viewport Stub</h4>
-          <p className="text-xs text-slate-400 max-w-md mt-1">
-            Interactive surface rendering, clipping planes, and anatomical density analysis will appear here in Phase 4.
-          </p>
-        </div>
-      </div>
-
-      {/* Structure Metrics Table */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Segmented Structures &amp; Topological Metrics ({activeCase.structures.length})
-          </h4>
-          <span className="text-[11px] font-mono text-slate-500">
-            Phase 4 Shared Contract: StructureReport
-          </span>
-        </div>
-
-        {activeCase.structures.length === 0 ? (
-          <div className="p-6 rounded-xl bg-slate-950/40 border border-slate-800 text-center text-xs text-slate-500">
-            No structures segmented yet. Advance to Stop 4 (AI Segmentation) to extract anatomical models.
-          </div>
-        ) : (
-          <div className="border border-slate-800 rounded-xl overflow-hidden">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-900 text-slate-400 font-mono border-b border-slate-800">
-                <tr>
-                  <th className="py-2.5 px-3">Organ / Structure</th>
-                  <th className="py-2.5 px-3 text-right">Volume (mm³)</th>
-                  <th className="py-2.5 px-3 text-right">Surface Area (mm²)</th>
-                  <th className="py-2.5 px-3 text-right">Mean Intensity</th>
-                  <th className="py-2.5 px-3 text-center">Watertight</th>
-                  <th className="py-2.5 px-3 text-center">Manifold</th>
-                  <th className="py-2.5 px-3 text-right">Triangles</th>
-                  <th className="py-2.5 px-3 text-right">Export</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/80 bg-slate-950/40 font-mono">
-                {activeCase.structures.map((s) => (
-                  <tr key={s.id} className="hover:bg-slate-900/40 transition-colors">
-                    <td className="py-3 px-3 font-sans font-medium text-white flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-cyan-400/80" />
-                      <span className="capitalize">{s.name}</span>
-                    </td>
-                    <td className="py-3 px-3 text-right text-slate-200">
-                      {s.volume_mm3.toLocaleString()}
-                    </td>
-                    <td className="py-3 px-3 text-right text-slate-200">
-                      {s.surface_area_mm2.toLocaleString()}
-                    </td>
-                    <td className="py-3 px-3 text-right text-slate-300">
-                      {s.intensity_mean.toFixed(1)} ± {s.intensity_std.toFixed(1)} HU
-                    </td>
-                    <td className="py-3 px-3 text-center">
-                      <span
-                        className={`inline-block px-1.5 py-0.5 rounded text-[10px] ${
-                          s.watertight
-                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/30'
-                            : 'bg-rose-950 text-rose-400'
-                        }`}
-                      >
-                        {s.watertight ? 'YES' : 'NO'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 text-center">
-                      <span
-                        className={`inline-block px-1.5 py-0.5 rounded text-[10px] ${
-                          s.manifold
-                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/30'
-                            : 'bg-rose-950 text-rose-400'
-                        }`}
-                      >
-                        {s.manifold ? 'YES' : 'NO'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 text-right text-slate-300">
-                      {s.face_count.toLocaleString()}
-                    </td>
-                    <td className="py-3 px-3 text-right">
-                      <div className="flex items-center justify-end gap-1 font-sans">
-                        {Object.keys(s.mesh_files).map((fmt) => (
-                          <button
-                            key={fmt}
-                            className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px] uppercase font-mono text-cyan-300 hover:text-white transition-colors"
-                          >
-                            {fmt}
-                          </button>
-                        ))}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
     </div>
   );

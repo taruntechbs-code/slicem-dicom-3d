@@ -10,6 +10,10 @@ SimpleITK>=2.3.0
 Pillow>=10.0.0
 scipy>=1.11.0
 nibabel>=5.2.0
+vtk>=9.2.0
+trimesh>=4.0.0
+# Optional / fallback mesh repair:
+# pymeshlab>=2023.12 (if arm64 wheel available)
 # Optional/runtime dependencies for deep learning inference:
 # torch>=2.0.0
 # TotalSegmentator>=2.0.0

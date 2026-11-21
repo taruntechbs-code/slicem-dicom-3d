@@ -39,6 +39,13 @@ export interface SegmentStatusResponse {
   report: CaseReport | null;
 }
 
+export interface MeshOptions {
+  smooth_iterations?: number;
+  pass_band?: number;
+  target_reduction?: number;
+  include_marching_cubes_baseline?: boolean;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -261,6 +268,36 @@ export const api = {
       return 60;
     }
   },
+
+  /**
+   * Run 3D surface mesh generation and structure analytics.
+   * Calls POST /api/cases/{case_id}/mesh
+   */
+  generateMeshes: (caseId: string, options: MeshOptions = {}): Promise<CaseReport> =>
+    fetchJson<CaseReport>(`/api/cases/${encodeURIComponent(caseId)}/mesh`, {
+      method: 'POST',
+      body: JSON.stringify(options),
+    }),
+
+  /**
+   * Get direct download/serving URL for a mesh asset (.glb, .stl, .obj).
+   */
+  getMeshAssetUrl: (caseId: string, filename: string): string => {
+    const cleanName = filename.replace(/^meshes\//, '');
+    return `${API_BASE_URL}/api/cases/${encodeURIComponent(caseId)}/meshes/${encodeURIComponent(cleanName)}`;
+  },
+
+  /**
+   * Get direct URL to download case export bundle (.zip).
+   */
+  getExportBundleUrl: (caseId: string): string =>
+    `${API_BASE_URL}/api/cases/${encodeURIComponent(caseId)}/export/bundle`,
+
+  /**
+   * Get direct URL to download report.json.
+   */
+  getReportDownloadUrl: (caseId: string): string =>
+    `${API_BASE_URL}/api/cases/${encodeURIComponent(caseId)}/report`,
 
   /**
    * Utility to return the configured base URL.
