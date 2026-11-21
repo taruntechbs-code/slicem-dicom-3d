@@ -182,3 +182,45 @@ def test_phantom_api_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     assert preview_mid.status_code == 200
     assert preview_mid.headers["content-type"] == "image/png"
     assert len(preview_mid.content) > 100
+
+
+def test_zip_upload_ignores_macosx_metadata(tmp_path: Path):
+    """Test 4: Verify ZIP upload ignores macOS metadata files (__MACOSX, ._*, .DS_Store)."""
+    import io
+    import zipfile
+
+    # 1. Generate 3 DICOM slices
+    raw_dir = tmp_path / "raw"
+    generate_sphere_phantom(
+        output_dir=raw_dir,
+        matrix_size=(3, 32, 32),
+        pixel_spacing_mm=(1.0, 1.0),
+        slice_spacing_mm=2.0,
+        radius_mm=5.0,
+    )
+
+    dcm_files = sorted(raw_dir.glob("*.dcm"))
+    assert len(dcm_files) == 3
+
+    # 2. Package into a zip containing macOS metadata artifacts
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w") as zf:
+        for f in dcm_files:
+            zf.write(f, arcname=f"head_ct/{f.name}")
+        # Inject macOS junk
+        zf.writestr("__MACOSX/head_ct/._slice_0000.dcm", b"Mac OS X metadata")
+        zf.writestr("head_ct/.DS_Store", b"Finder desktop services")
+        zf.writestr("head_ct/._slice_0001.dcm", b"Resource fork")
+
+    zip_buffer.seek(0)
+
+    # 3. Upload to /api/cases/upload
+    res = client.post(
+        "/api/cases/upload",
+        files={"files": ("ct_nonequi_tilt.zip", zip_buffer.getvalue(), "application/zip")},
+    )
+    assert res.status_code == 200, res.text
+    data = res.json()
+    # Must only parse the 3 real DICOM slices
+    assert data["scan"]["slice_count"] == 3
+    assert data["geometry"]["status"] in ("PASS", "WARN")

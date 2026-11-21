@@ -688,10 +688,20 @@ const CorrectStepView: React.FC<CorrectStepViewProps> = ({
   const scan = activeCase.scan;
 
   const [isotropicSpacing, setIsotropicSpacing] = useState<number>(1.0);
-  const [applyMotionCorrection, setApplyMotionCorrection] = useState<boolean>(true);
+  const [applyMotionCorrection, setApplyMotionCorrection] = useState<boolean>(
+    () => scan.modality === 'MRI'
+  );
   const [simulateMotionMm, setSimulateMotionMm] = useState<number>(0.0);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (simulateMotionMm > 0) {
+      setApplyMotionCorrection(true);
+    } else {
+      setApplyMotionCorrection(scan.modality === 'MRI');
+    }
+  }, [activeCase.case_id, scan.modality]);
 
   const [axis, setAxis] = useState<'axial' | 'coronal' | 'sagittal'>(() =>
     Math.abs(g.gantry_tilt_deg) > 0.5 ? 'sagittal' : 'axial'
@@ -851,7 +861,11 @@ const CorrectStepView: React.FC<CorrectStepViewProps> = ({
             <span className="text-[#86868B]">Simulate Shift:</span>
             <select
               value={simulateMotionMm}
-              onChange={(e) => setSimulateMotionMm(parseFloat(e.target.value))}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                setSimulateMotionMm(val);
+                if (val > 0) setApplyMotionCorrection(true);
+              }}
               disabled={isRunning}
               className="bg-[#141416] border border-white/[0.08] text-[#F5F5F7] rounded-full px-2.5 py-1 text-xs outline-none hover:bg-[#2C2C2E] cursor-pointer"
             >
@@ -1226,6 +1240,7 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
                 className="bg-[#141416] border border-white/[0.08] text-[#F5F5F7] rounded-full px-2.5 py-1 text-xs outline-none hover:bg-[#2C2C2E] cursor-pointer"
               >
                 <option value="phantom_threshold">Phantom / Threshold (Fast Local)</option>
+                <option value="ct_bone_threshold">CT Bone / Skull (&gt; 300 HU)</option>
                 <option value="totalsegmentator_fast">TotalSegmentator (Fast)</option>
                 <option value="totalsegmentator_full">TotalSegmentator (Full)</option>
                 <option value="nnunet_custom">nnU-Net Custom (ACDC Cardiac)</option>

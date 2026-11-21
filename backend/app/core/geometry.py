@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pydicom
+from scipy.interpolate import interp1d
+import scipy.ndimage
 import SimpleITK as sitk
 
 from app.models.schemas import (
@@ -104,7 +106,11 @@ def analyze_dicom_series(
         [
             f
             for f in dicom_dir.rglob("*")
-            if f.is_file() and not f.name.startswith(".") and f.name != "phantom_truth.json"
+            if f.is_file()
+            and not f.name.startswith(".")
+            and not f.name.startswith("._")
+            and "__MACOSX" not in f.parts
+            and f.name != "phantom_truth.json"
         ]
     )
 
@@ -311,6 +317,7 @@ def analyze_dicom_series(
         "missing_slice_indices": missing_slice_indices,
         "sorted_filenames": sorted_filenames,
         "sorted_positions": [float(s.pos) for s in sorted_slices],
+        "sorted_ipps": [[float(x) for x in s.ipp] for s in sorted_slices],
         "intensity_min": float(np.min(raw_volume)),
         "intensity_max": float(np.max(raw_volume)),
         "intensity_mean": float(np.mean(raw_volume)),
@@ -454,12 +461,14 @@ def correct_volume_geometry(
 ) -> Tuple[sitk.Image, Dict[str, Any]]:
     """Straighten gantry tilt shearing and resample volume to isotropic voxels.
 
+    Handles both uniform and non-equidistant slice spacing with exact per-slice
+    in-plane deskew and 1D Z-interpolation along true patient acquisition coordinates.
+
     Steps:
     1. Load volume_raw.npy and geometry_meta.json.
-    2. Construct SimpleITK.Image with exact physical origin, measured spacing, and direction.
-    3. If gantry_tilt_deg > 0.5, apply SimpleITK.AffineTransform shear resampling along Y
-       proportional to z*tan(tilt) to deskew the volume into an orthogonal patient frame.
-    4. Resample to isotropic voxel dimensions (isotropic_spacing_mm^3) using sitkLinear.
+    2. Deskew each slice in-plane by its exact IPP offset relative to the first slice.
+    3. Interpolate along Z from true non-uniform positions onto a uniform Z grid.
+    4. Resample in-plane to isotropic dimensions (isotropic_spacing_mm^3).
     5. Save case_dir / volume_iso.nii.gz.
 
     Returns:
@@ -481,63 +490,101 @@ def correct_volume_geometry(
     col_spacing = float(meta["pixel_spacing_mm"][1])
     row_spacing = float(meta["pixel_spacing_mm"][0])
     measured_z = float(meta["measured_spacing_mm"] or 2.0)
-
-    # 1. Create SimpleITK image from numpy array (shape Z, Y, X -> size X, Y, Z)
-    raw_img = sitk.GetImageFromArray(vol_raw.astype(np.float32))
-    raw_img.SetSpacing((col_spacing, row_spacing, measured_z))
-
     origin_ipp = meta.get("origin_ipp", [0.0, 0.0, 0.0])
-    raw_img.SetOrigin(tuple(float(x) for x in origin_ipp))
-    raw_img.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
-
+    iop = meta.get("iop", [1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
+    row_vec = np.array(iop[:3], dtype=np.float64)
+    col_vec = np.array(iop[3:6], dtype=np.float64)
+    pos = np.array(meta.get("sorted_positions", []), dtype=np.float64)
     tilt_deg = float(meta.get("gantry_tilt_deg", 0.0))
     deskew_applied = abs(tilt_deg) > 0.5
-
-    # 2. Build transform: identity or shear deskew
-    transform = sitk.AffineTransform(3)
-    if deskew_applied:
-        tan_tilt = float(np.tan(np.radians(tilt_deg)))
-        # Resample evaluates T(p_out) = p_in.
-        # Since tilted slices were shifted along Y by -z*tan(tilt) in slice space,
-        # mapping output (x, y, z) to input (x, y - z*tan(tilt), z) straightens the anatomy.
-        transform.SetCenter(raw_img.GetOrigin())
-        transform.SetMatrix([1.0, 0.0, 0.0, 0.0, 1.0, -tan_tilt, 0.0, 0.0, 1.0])
-
-    # 3. Build isotropic output reference grid
+    sorted_ipps = meta.get("sorted_ipps")
+    modality = meta.get("modality", "CT")
+    default_bg = -1000.0 if modality == "CT" else 0.0
     iso_spacing = float(isotropic_spacing_mm)
-    in_size = raw_img.GetSize()
-    in_spacing = raw_img.GetSpacing()
 
-    out_size = [
-        int(round(in_size[i] * in_spacing[i] / iso_spacing))
-        for i in range(3)
-    ]
+    S, R, C = vol_raw.shape
+
+    # 1. Deskew each slice in-plane by its exact IPP offset relative to the first slice
+    deskewed_vol = np.copy(vol_raw.astype(np.float32))
+    any_slice_shifted = False
+
+    for k in range(S):
+        if sorted_ipps and len(sorted_ipps) == S:
+            delta_ipp = np.array(sorted_ipps[k], dtype=np.float64) - np.array(sorted_ipps[0], dtype=np.float64)
+            shift_x_mm = float(np.dot(delta_ipp, row_vec))
+            shift_y_mm = float(np.dot(delta_ipp, col_vec))
+        else:
+            pos_rel = (pos[k] - pos[0]) if len(pos) == S else (k * measured_z)
+            shift_x_mm = 0.0
+            shift_y_mm = pos_rel * float(np.tan(np.radians(tilt_deg))) if deskew_applied else 0.0
+
+        shift_y_pix = shift_y_mm / row_spacing
+        shift_x_pix = shift_x_mm / col_spacing
+
+        if abs(shift_y_pix) > 1e-4 or abs(shift_x_pix) > 1e-4:
+            deskewed_vol[k] = scipy.ndimage.shift(
+                deskewed_vol[k],
+                shift=(shift_y_pix, shift_x_pix),
+                order=1,
+                mode="constant",
+                cval=default_bg,
+            )
+            any_slice_shifted = True
+
+    if any_slice_shifted:
+        deskew_applied = True
+
+    # 2. Resample along Z using 1D interpolation from true non-uniform pos to uniform grid
+    if len(pos) == S and S > 1 and (pos[-1] > pos[0]):
+        z_min = float(pos[0])
+        z_max = float(pos[-1])
+        Nz = int(round((z_max - z_min) / iso_spacing)) + 1
+        z_grid = np.linspace(z_min, z_max, Nz)
+        interp_fn = interp1d(
+            pos,
+            deskewed_vol,
+            axis=0,
+            kind="linear",
+            bounds_error=False,
+            fill_value=default_bg,
+            assume_sorted=True,
+        )
+        z_resampled = interp_fn(z_grid).astype(np.float32)
+    else:
+        z_resampled = deskewed_vol.astype(np.float32)
+        Nz = S
+
+    # 3. Build SimpleITK image with exact origin & direction and resample in-plane to isotropic
+    z_img = sitk.GetImageFromArray(z_resampled)
+    z_img.SetSpacing((col_spacing, row_spacing, iso_spacing))
+    z_img.SetOrigin(tuple(float(x) for x in origin_ipp))
+    z_img.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+
+    out_cols = int(round(C * col_spacing / iso_spacing))
+    out_rows = int(round(R * row_spacing / iso_spacing))
+    out_size = [out_cols, out_rows, Nz]
 
     ref_img = sitk.Image(out_size, sitk.sitkFloat32)
     ref_img.SetSpacing((iso_spacing, iso_spacing, iso_spacing))
-    ref_img.SetOrigin(raw_img.GetOrigin())
-    ref_img.SetDirection(raw_img.GetDirection())
+    ref_img.SetOrigin(z_img.GetOrigin())
+    ref_img.SetDirection(z_img.GetDirection())
 
-    # Default background pixel value (-1000.0 for CT, 0.0 for MRI)
-    default_bg = -1000.0 if meta.get("modality", "CT") == "CT" else 0.0
-
-    # 4. Resample volume
     iso_img = sitk.Resample(
-        raw_img,
+        z_img,
         ref_img,
-        transform,
+        sitk.Transform(),
         sitk.sitkLinear,
         default_bg,
     )
 
-    # 5. Save volume_iso.nii.gz
+    # 4. Save volume_iso.nii.gz
     iso_output_path = case_dir / "volume_iso.nii.gz"
     sitk.WriteImage(iso_img, str(iso_output_path))
 
     correction_meta = {
         "isotropic_spacing_mm": iso_spacing,
-        "input_spacing_mm": list(in_spacing),
-        "input_size": list(in_size),
+        "input_spacing_mm": [col_spacing, row_spacing, measured_z],
+        "input_size": [C, R, S],
         "output_size": list(out_size),
         "gantry_tilt_deg": tilt_deg,
         "deskew_applied": deskew_applied,

@@ -94,6 +94,7 @@ def correct_slice_motion(
     img: sitk.Image,
     known_initial_shifts_mm: Optional[List[float]] = None,
     case_dir: Optional[Path] = None,
+    max_expected_shift: float = 8.0,
 ) -> Tuple[sitk.Image, Dict[str, Any]]:
     """Perform slice-by-slice 2D rigid registration along Z to correct motion artifacts.
 
@@ -148,8 +149,15 @@ def correct_slice_motion(
         if np.any(mask_ref) and np.any(mask_mov):
             y_r, x_r = np.where(mask_ref)
             y_m, x_m = np.where(mask_mov)
-            dx_init = float(np.mean(x_m) - np.mean(x_r)) * spacing[0]
-            dy_init = float(np.mean(y_m) - np.mean(y_r)) * spacing[1]
+            com_shift = float(np.hypot(
+                (np.mean(x_m) - np.mean(x_r)) * spacing[0],
+                (np.mean(y_m) - np.mean(y_r)) * spacing[1],
+            ))
+            if com_shift <= max_expected_shift:
+                dx_init = float(np.mean(x_m) - np.mean(x_r)) * spacing[0]
+                dy_init = float(np.mean(y_m) - np.mean(y_r)) * spacing[1]
+            else:
+                dx_init, dy_init = 0.0, 0.0
         else:
             dx_init, dy_init = 0.0, 0.0
 
@@ -173,6 +181,11 @@ def correct_slice_motion(
 
         ox, oy = tx.GetOffset()
         rec_mag = float(np.hypot(ox, oy))
+        if rec_mag > max_expected_shift:
+            # Shift exceeded physical threshold (likely anatomical variance between slices, not motion artifact)
+            # Revert to identity (0 shift) for this slice
+            tx.SetOffset((0.0, 0.0))
+            rec_mag = 0.0
 
         # Resample moving slice with the recovered transformation
         aligned_slice = sitk.Resample(

@@ -166,14 +166,23 @@ def generate_structure_meshes(
         if np.sum(bin_arr) == 0:
             continue
 
+        # Zero-pad mask by 1 voxel on all 6 faces to cleanly cap structures touching boundaries (watertight guarantee)
+        bin_arr_padded = np.pad(bin_arr, 1, mode="constant", constant_values=0)
+        padded_dims = (dims[0] + 2, dims[1] + 2, dims[2] + 2)
+        padded_origin = (
+            origin[0] - spacing[0],
+            origin[1] - spacing[1],
+            origin[2] - spacing[2],
+        )
+
         # In numpy (Z, Y, X), C-order flattening has X changing fastest, matching VTK (X, Y, Z)
-        bin_arr_contig = np.ascontiguousarray(bin_arr, dtype=np.uint8)
+        bin_arr_contig = np.ascontiguousarray(bin_arr_padded, dtype=np.uint8)
         vtk_scalars = numpy_to_vtk(bin_arr_contig.ravel(), deep=True, array_type=VTK_UNSIGNED_CHAR)
 
         vtk_img = vtkImageData()
-        vtk_img.SetDimensions(dims[0], dims[1], dims[2])
+        vtk_img.SetDimensions(padded_dims[0], padded_dims[1], padded_dims[2])
         vtk_img.SetSpacing(spacing[0], spacing[1], spacing[2])
-        vtk_img.SetOrigin(origin[0], origin[1], origin[2])
+        vtk_img.SetOrigin(padded_origin[0], padded_origin[1], padded_origin[2])
         vtk_img.GetPointData().SetScalars(vtk_scalars)
 
         # 2. Surface extraction via vtkFlyingEdges3D

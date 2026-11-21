@@ -26,6 +26,7 @@ from app.models.schemas import CaseReport, StageStatus, StructureReport
 
 EngineType = Literal[
     "phantom_threshold",
+    "ct_bone_threshold",
     "totalsegmentator_fast",
     "totalsegmentator_full",
     "nnunet_custom",
@@ -167,6 +168,24 @@ def _segment_phantom_threshold(
     return label_img, label_names
 
 
+def _segment_ct_bone_threshold(
+    volume_img: sitk.Image,
+) -> Tuple[sitk.Image, Dict[int, str]]:
+    """Segment cortical bone and skull structures via deterministic thresholding (> 300 HU)."""
+    vol_arr = sitk.GetArrayViewFromImage(volume_img)
+    # Cortical bone and skull are > 300 HU; strips away soft tissue and CT scanner headrest
+    mask = vol_arr > 300.0
+
+    label_arr = np.zeros(vol_arr.shape, dtype=np.uint16)
+    label_arr[mask] = 1
+
+    label_img = sitk.GetImageFromArray(label_arr)
+    label_img.CopyInformation(volume_img)
+    label_names = {1: "skull_bone"}
+
+    return label_img, label_names
+
+
 def _segment_totalsegmentator(
     volume_path: Path,
     modality: str,
@@ -299,6 +318,9 @@ def run_segmentation(
         raw_label_img, label_names = _segment_phantom_threshold(
             volume_img, report.scan.modality, is_synthetic_phantom=is_synthetic
         )
+    elif engine == "ct_bone_threshold":
+        volume_img = sitk.ReadImage(str(vol_path))
+        raw_label_img, label_names = _segment_ct_bone_threshold(volume_img)
     elif engine in ("totalsegmentator_fast", "totalsegmentator_full"):
         fast_mode = engine == "totalsegmentator_fast"
         raw_label_img, label_names = _segment_totalsegmentator(
@@ -317,7 +339,7 @@ def run_segmentation(
     else:
         raise ValueError(
             f"Unsupported engine '{engine}'. Choose from: "
-            "phantom_threshold, totalsegmentator_fast, totalsegmentator_full, nnunet_custom."
+            "phantom_threshold, ct_bone_threshold, totalsegmentator_fast, totalsegmentator_full, nnunet_custom."
         )
 
     # 3. Topological cleanup & component integrity audit

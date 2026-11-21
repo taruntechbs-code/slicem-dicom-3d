@@ -488,14 +488,22 @@ export const InspectStep: React.FC<InspectStepProps> = ({
                 <div className="p-2.5 rounded-xl bg-[#1C1C1E]/60 border border-white/[0.04]">
                   <span className="text-[10px] text-[#86868B] block">Volume</span>
                   <span className="font-mono tabular-nums font-semibold text-sm text-[#F5F5F7] mt-0.5 block">
-                    {(selectedStructure.volume_mm3 / 1000).toFixed(2)} cm³
+                    {(selectedStructure.volume_mm3 / 1000).toLocaleString('en-US', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{' '}
+                    cm³
                   </span>
                 </div>
 
                 <div className="p-2.5 rounded-xl bg-[#1C1C1E]/60 border border-white/[0.04]">
                   <span className="text-[10px] text-[#86868B] block">Surface Area</span>
                   <span className="font-mono tabular-nums font-semibold text-sm text-[#F5F5F7] mt-0.5 block">
-                    {selectedStructure.surface_area_mm2.toLocaleString()} mm²
+                    {selectedStructure.surface_area_mm2.toLocaleString('en-US', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{' '}
+                    mm²
                   </span>
                 </div>
 
@@ -503,7 +511,10 @@ export const InspectStep: React.FC<InspectStepProps> = ({
                   <span className="text-[10px] text-[#86868B] block">Cortical Thickness</span>
                   <span className="font-mono tabular-nums font-semibold text-sm text-[#0A84FF] mt-0.5 block">
                     {selectedStructure.mean_thickness_mm !== null
-                      ? `${selectedStructure.mean_thickness_mm.toFixed(2)} mm`
+                      ? `${selectedStructure.mean_thickness_mm.toLocaleString('en-US', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })} mm`
                       : 'N/A'}
                   </span>
                 </div>
@@ -511,21 +522,25 @@ export const InspectStep: React.FC<InspectStepProps> = ({
                 <div className="p-2.5 rounded-xl bg-[#1C1C1E]/60 border border-white/[0.04]">
                   <span className="text-[10px] text-[#86868B] block">Mean Intensity</span>
                   <span className="font-mono tabular-nums font-semibold text-sm text-[#F5F5F7] mt-0.5 block">
-                    {selectedStructure.intensity_mean.toFixed(1)} HU
+                    {selectedStructure.intensity_mean.toLocaleString('en-US', {
+                      minimumFractionDigits: 1,
+                      maximumFractionDigits: 1,
+                    })}{' '}
+                    HU
                   </span>
                 </div>
 
                 <div className="p-2.5 rounded-xl bg-[#1C1C1E]/60 border border-white/[0.04]">
                   <span className="text-[10px] text-[#86868B] block">Vertices</span>
                   <span className="font-mono tabular-nums text-xs text-[#86868B] mt-0.5 block">
-                    {selectedStructure.vertex_count.toLocaleString()}
+                    {selectedStructure.vertex_count.toLocaleString('en-US')}
                   </span>
                 </div>
 
                 <div className="p-2.5 rounded-xl bg-[#1C1C1E]/60 border border-white/[0.04]">
                   <span className="text-[10px] text-[#86868B] block">Faces</span>
                   <span className="font-mono tabular-nums text-xs text-[#86868B] mt-0.5 block">
-                    {selectedStructure.face_count.toLocaleString()}
+                    {selectedStructure.face_count.toLocaleString('en-US')}
                   </span>
                 </div>
               </div>

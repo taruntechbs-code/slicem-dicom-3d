@@ -305,3 +305,82 @@ def test_segmentation_with_clinical_nonzero_origin(tmp_path: Path):
     assert final_report.structures[0].watertight is True
     assert final_report.structures[0].mean_thickness_mm is not None
 
+
+def test_ct_bone_threshold_and_boundary_capping(tmp_path: Path):
+    """Test 5: Verify ct_bone_threshold mode and zero-padded watertight mesh capping."""
+    case_dir = tmp_path / "case_bone"
+    case_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Create a 30x32x32 CT volume with a skull bone slab touching top and bottom boundaries (z=0 and z=29)
+    vol_arr = np.full((30, 32, 32), -1000.0, dtype=np.float32)
+    # Bone slab (> 300 HU, e.g. 700 HU) touching z boundaries
+    vol_arr[:, 8:24, 8:24] = 700.0
+    # Soft tissue island (< 300 HU, e.g. 50 HU) that should be excluded
+    vol_arr[:, 0:6, 0:6] = 50.0
+
+    vol_img = sitk.GetImageFromArray(vol_arr)
+    vol_img.SetSpacing((1.0, 1.0, 1.0))
+    vol_img.SetOrigin((0.0, 0.0, 0.0))
+    sitk.WriteImage(vol_img, str(case_dir / "volume_corrected.nii.gz"))
+
+    # Minimal report.json
+    from app.models.schemas import CaseReport, GeometryReport, MotionReport, ScanReport, SegmentationReport
+    report = CaseReport(
+        case_id="CASE-BONE-CAPPING",
+        created_at="2026-11-21T18:00:00Z",
+        status="pass",
+        scan=ScanReport(
+            modality="CT",
+            slice_count=30,
+            rows=32,
+            cols=32,
+            pixel_spacing_mm=[1.0, 1.0],
+            declared_thickness_mm=1.0,
+        ),
+        geometry=GeometryReport(
+            status="PASS",
+            slices_reordered=False,
+            measured_spacing_mm=1.0,
+            spacing_mismatch_mm=0.0,
+            missing_slice_indices=[],
+            gantry_tilt_deg=0.0,
+            isotropic_spacing_mm=1.0,
+            warnings=[],
+        ),
+        motion=MotionReport(
+            status="PASS",
+            applied=False,
+            per_slice_initial_shift_mm=[],
+            per_slice_residual_shift_mm=[],
+            max_residual_shift_mm=0.0,
+            flagged=False,
+        ),
+        segmentation=SegmentationReport(
+            status="PENDING",
+            model_used=None,
+            runtime_sec=None,
+            peak_vram_mb=None,
+            warnings=[],
+        ),
+        structures=[],
+        stage_timings_sec={},
+    )
+    (case_dir / "report.json").write_text(report.model_dump_json(indent=2))
+
+    # 2. Run ct_bone_threshold engine
+    seg_report = run_segmentation(case_dir, engine="ct_bone_threshold")
+    assert seg_report.segmentation.status == "PASS"
+    assert seg_report.segmentation.model_used == "ct_bone_threshold"
+    assert len(seg_report.structures) == 1
+    assert seg_report.structures[0].name == "skull_bone"
+    assert seg_report.structures[0].intensity_mean > 650.0
+
+    # 3. Generate 3D surface meshes and verify watertight boundary capping
+    from app.core.mesh import generate_structure_meshes
+    mesh_results = generate_structure_meshes(case_dir)
+    assert len(mesh_results) == 1
+    # Because of zero-padding on all 6 faces, even structures touching z=0 and z=29 are watertight!
+    assert mesh_results[0]["watertight"] is True
+    assert (case_dir / "meshes" / "skull_bone.stl").is_file()
+    assert (case_dir / "meshes" / "skull_bone.glb").is_file()
+

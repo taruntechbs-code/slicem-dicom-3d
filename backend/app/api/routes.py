@@ -149,12 +149,22 @@ async def upload_dicom_series(files: List[UploadFile] = File(...)) -> CaseReport
             if filename.lower().endswith(".zip"):
                 with zipfile.ZipFile(io.BytesIO(content)) as z:
                     for member in z.namelist():
-                        if not member.endswith("/") and not member.startswith("__MACOSX"):
-                            target_path = raw_dicom_dir / Path(member).name
-                            with z.open(member) as source, open(target_path, "wb") as dest:
-                                shutil.copyfileobj(source, dest)
+                        p = Path(member)
+                        if (
+                            member.endswith("/")
+                            or "__MACOSX" in member
+                            or p.name.startswith(".")
+                            or p.name.startswith("._")
+                        ):
+                            continue
+                        target_path = raw_dicom_dir / p.name
+                        with z.open(member) as source, open(target_path, "wb") as dest:
+                            shutil.copyfileobj(source, dest)
             else:
-                dest_path = raw_dicom_dir / Path(filename).name
+                p = Path(filename)
+                if "__MACOSX" in filename or p.name.startswith(".") or p.name.startswith("._"):
+                    continue
+                dest_path = raw_dicom_dir / p.name
                 with open(dest_path, "wb") as f:
                     f.write(content)
 
