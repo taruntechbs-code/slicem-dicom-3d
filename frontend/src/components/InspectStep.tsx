@@ -9,6 +9,7 @@ import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
+  FileText,
 } from 'lucide-react';
 
 import { CaseReport } from '../types/case';
@@ -170,6 +171,16 @@ export const InspectStep: React.FC<InspectStepProps> = ({
             )}
             <span>{isGenerating ? 'Extracting Meshes...' : 'Generate 3D Meshes & Analytics'}</span>
           </button>
+
+          <a
+            href={api.getCasePdfReportUrl(activeCase.case_id)}
+            download={`${activeCase.case_id}_report.pdf`}
+            className="px-3.5 py-2 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-700/60 text-xs font-semibold text-cyan-200 font-mono flex items-center gap-2 shadow-sm transition-colors"
+            title="Download executive 1-page A4 PDF case summary"
+          >
+            <FileText className="w-4 h-4 text-cyan-400" />
+            <span>1-Page PDF Report</span>
+          </a>
 
           <a
             href={api.getExportBundleUrl(activeCase.case_id)}

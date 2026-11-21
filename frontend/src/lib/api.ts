@@ -47,6 +47,14 @@ export interface MeshOptions {
   include_marching_cubes_baseline?: boolean;
 }
 
+export interface PresetMeta {
+  slug: string;
+  title: string;
+  description: string;
+  case_id: string;
+  cached: boolean;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -322,6 +330,28 @@ export const api = {
     fetchJson<BenchmarkRunSummary>('/api/benchmarks/run-phantom', {
       method: 'POST',
     }),
+
+  /**
+   * List available deterministic demo presets.
+   * Calls GET /api/presets
+   */
+  listPresets: (): Promise<PresetMeta[]> =>
+    fetchJson<PresetMeta[]>('/api/presets'),
+
+  /**
+   * Load or compute a demo preset case.
+   * Calls POST /api/cases/preset/{slug}
+   */
+  loadPreset: (slug: string): Promise<CaseReport> =>
+    fetchJson<CaseReport>(`/api/cases/preset/${encodeURIComponent(slug)}`, {
+      method: 'POST',
+    }),
+
+  /**
+   * Direct download URL for executive one-page A4 PDF case report.
+   */
+  getCasePdfReportUrl: (caseId: string): string =>
+    `${API_BASE_URL}/api/cases/${encodeURIComponent(caseId)}/report/pdf`,
 
   /**
    * Utility to return the configured base URL.

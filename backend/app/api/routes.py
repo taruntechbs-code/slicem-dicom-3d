@@ -952,4 +952,69 @@ def trigger_phantom_benchmark() -> Dict[str, Any]:
         ) from exc
 
 
+# ─── Stop 7: PDF Reporting & Instant Demo Presets (Phase 6) ────────────────
+
+@router.get("/cases/{case_id}/report/pdf")
+def get_case_pdf_report(case_id: str) -> Response:
+    """Generate and stream an executive one-page A4 PDF case report."""
+    workspace = config.WORKSPACE_DIR
+    case_dir = (workspace / case_id).resolve()
+
+    if not case_dir.is_dir() or workspace.resolve() not in case_dir.parents:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case '{case_id}' not found",
+        )
+
+    try:
+        from app.core.reporting import generate_case_pdf
+
+        pdf_bytes = generate_case_pdf(case_dir)
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{case_id}_report.pdf"',
+            },
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate PDF report: {exc}",
+        ) from exc
+
+
+@router.get("/presets")
+def get_demo_presets() -> List[Dict[str, Any]]:
+    """List available demo presets and cache readiness."""
+    from app.core.presets import list_presets
+
+    return list_presets(config.WORKSPACE_DIR)
+
+
+@router.post("/cases/preset/{slug}")
+def load_preset_case(slug: str) -> CaseReport:
+    """Load cached CaseReport or generate demo preset end-to-end and cache."""
+    from app.core.presets import load_or_generate_preset
+
+    try:
+        return load_or_generate_preset(slug, config.WORKSPACE_DIR)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load preset '{slug}': {exc}",
+        ) from exc
+
+
+
 

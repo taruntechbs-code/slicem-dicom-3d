@@ -1,28 +1,31 @@
 # SliceM — Geometry-First 3D Anatomical Reconstruction Pipeline
 
 > **Geometry-first 3D anatomical reconstruction from DICOM (CT and MRI)**  
-> Target development platform: macOS (Apple Silicon). Clean, strictly typed, modular architecture.
+> Production-grade, strictly typed, modular architecture built for macOS (Apple Silicon unified memory) and Linux (12 GB NVIDIA CUDA GPUs).
+
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg)](https://fastapi.tiangolo.com/)
+[![React 18](https://img.shields.io/badge/React-18-61DAFB.svg)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178C6.svg)](https://www.typescriptlang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
 
-## 1. Overview & Architecture
+## 1. Overview & 5-Stop Architecture
 
-SliceM is designed to overcome common clinical pitfalls in 3D medical reconstruction:
-- Arbitrary slice ordering that ignores true patient coordinate reference frames.
-- Gantry tilt shearing artifacts in CT acquisitions.
-- Spacing discrepancies between nominal header thickness and actual slice displacement.
-- Motion-corrupted 2D acquisitions leading to jagged 3D anatomical surfaces.
-- Non-watertight, non-manifold reconstructed meshes unsuitable for simulation or CAD/CAM fabrication.
+SliceM solves common clinical pitfalls in 3D anatomical reconstruction:
+1. **Unreliable DICOM Slice Ordering**: Sorting by filename or `InstanceNumber` fails on PACs exports; SliceM strictly projects `ImagePositionPatient` (0020,0032) along the acquisition normal $n = \text{IOP}_{row} \times \text{IOP}_{col}$.
+2. **Gantry Tilt Distortion**: CT scanners with tilted gantries induce affine shear; SliceM calculates the shear vector from consecutive IPPs and deskews the volume into an orthogonal patient reference frame.
+3. **Spacing Mismatches & Gaps**: Flags discrepancies between declared `SliceThickness` (0018,0050) and physical IPP displacement, while identifying missing slice gaps.
+4. **Patient Motion Artifacts**: Intra-scan motion causes serrated organ surfaces; SliceM performs slice-by-slice 2D-3D rigid registration with Mattes Mutual Information.
+5. **Non-Manifold / Leaky Meshes**: Raw Marching Cubes generates non-manifold self-intersections and shrinking artifacts; SliceM uses `vtkFlyingEdges3D`, non-shrinking `vtkWindowedSincPolyDataFilter`, and quadric edge collapse to guarantee watertight, 2-manifold closed surfaces.
 
-### Phased Roadmap
-
-| Phase | Milestone | Focus |
-|---|---|---|
-| **Phase 0** | **Repo Skeleton & Shared Contract** | Full-stack runnable shell, strict Pydantic v2 & TypeScript `CaseReport` schema, health endpoints, interactive 5-stop stepper. |
-| **Phase 1 (Complete)** | **Geometry & Phantoms (Stop 1 & 2)** | `ImagePositionPatient` (0020,0032) sorting along `ImageOrientationPatient` (0020,0037) acquisition normal, gantry tilt shear detection, spacing discrepancy verification, missing slice detection, synthetic geometric phantoms, 2D slice scrubber. |
-| **Phase 2** | **Motion Correction (SVR)** | Intra-scan patient motion detection, rigid 6-DOF slice-to-volume registration, residual displacement metrics. |
-| **Phase 3** | **Anatomical AI Segmentation** | Unified deep learning inference engine (TotalSegmentator / nnU-Net), Apple Silicon MPS unified memory monitoring. |
-| **Phase 4** | **3D Meshing & Analytics** | Discrete Marching Cubes, Taubin curvature-preserving smoothing, manifold/watertight topological repair, STL/OBJ/GLB export, radiomic and morphometric analytics. |
+```
+┌─────────────────┐     ┌──────────────────┐     ┌───────────────────┐     ┌───────────────────┐     ┌────────────────────────┐
+│  Stop 1: Load   │ ──> │  Stop 2: Verify  │ ──> │  Stop 3: Correct  │ ──> │  Stop 4: Segment  │ ──> │  Stop 5: Inspect/Export │
+│ DICOM / Phantom │     │  IPP & Tilt Q/C  │     │ Deskew & Resample │     │ Multi-Engine AI   │     │  Watertight 3D & PDF   │
+└─────────────────┘     └──────────────────┘     └───────────────────┘     └───────────────────┘     └────────────────────────┘
+```
 
 ---
 
@@ -30,172 +33,181 @@ SliceM is designed to overcome common clinical pitfalls in 3D medical reconstruc
 
 ```text
 slicem-dicom-3d/
-├── .gitignore
 ├── README.md
+├── scripts/
+│   ├── start_slicem.sh             # Unified launcher (backend + frontend concurrent)
+│   ├── check_slicer_parity.py      # 3D Slicer coordinate & geometry parity cross-check
+│   ├── prepare_acdc_nnunet.py      # ACDC cardiac MRI to nnU-Net v2 dataset converter
+│   └── train_acdc_nnunet.sh        # Linux 12 GB GPU nnU-Net v2 training runner
 ├── workspace/                      # Runtime case storage (gitignored)
-│   └── CASE-DEMO-001/
-│       └── report.json
+│   ├── benchmarks/                 # Automated benchmark CSVs & JSON summaries
+│   └── PRESET-{slug}/              # Instant demo presets (pre-computed cache)
 ├── backend/
-│   ├── requirements.txt            # Lightweight Phase 0 dependencies
+│   ├── requirements.txt            # Python dependencies (SimpleITK, VTK, trimesh, fpdf2)
 │   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py                 # FastAPI application, CORS, router mount, /health
-│   │   ├── config.py               # WORKSPACE_DIR, allowed origins, defaults
-│   │   ├── models/
-│   │   │   ├── __init__.py
-│   │   │   └── schemas.py          # Strict Pydantic v2 models for CaseReport
-│   │   ├── api/
-│   │   │   ├── __init__.py
-│   │   │   └── routes.py           # /api/health, /api/cases (list/get stub)
-│   │   └── core/
-│   │       ├── __init__.py
-│   │       ├── geometry.py         # Phase 1 & 2 stub
-│   │       ├── phantoms.py         # Phase 1 stub
-│   │       ├── motion.py           # Phase 2 stub
-│   │       ├── segment.py          # Phase 3 stub
-│   │       ├── mesh.py             # Phase 4 stub
-│   │       └── analytics.py        # Phase 4 stub
-│   └── tests/
-│       ├── __init__.py
-│       └── test_health.py          # Health check & strict data contract tests
-└── frontend/                       # Vite + React + TypeScript + Tailwind CSS
-    ├── .npmrc
-    ├── index.html
-    ├── package.json
-    ├── postcss.config.js
-    ├── tailwind.config.js
-    ├── tsconfig.json
-    ├── tsconfig.node.json
-    ├── vite.config.ts
+│   │   ├── main.py                 # FastAPI application & router mounts
+│   │   ├── config.py               # WORKSPACE_DIR & server config
+│   │   ├── models/schemas.py       # Strict Pydantic v2 CaseReport contract
+│   │   ├── api/routes.py           # REST endpoints (cases, presets, benchmarks, export, PDF)
+│   │   ├── core/
+│   │   │   ├── geometry.py         # IPP sorting, gantry tilt deskew, isotropic resampling
+│   │   │   ├── phantoms.py         # Synthetic DICOM CT phantom generator
+│   │   │   ├── motion.py           # 2D-3D slice-to-volume registration & motion injection
+│   │   │   ├── segment.py          # TotalSegmentator, nnU-Net & threshold segmenter
+│   │   │   ├── mesh.py             # Headless VTK Flying Edges, sinc smoothing, STL/OBJ/GLB
+│   │   │   ├── analytics.py        # SignedMaurer distance map wall thickness & radiomics
+│   │   │   ├── reporting.py        # Executive one-page A4 PDF case report generator
+│   │   │   └── presets.py          # Deterministic demo presets (< 1s load)
+│   │   └── validation/
+│   │       ├── metrics.py          # DSC, MSD, HD95, Volume Error, SliceM targets
+│   │       └── run_benchmark.py    # Multi-case CLI benchmark suite
+│   └── tests/                      # Pytest suite (21 unit and integration tests)
+└── frontend/                       # Vite + React 18 + TypeScript + Tailwind CSS
     └── src/
-        ├── App.tsx                 # Medical-grade dark UI & 5-step view switcher
-        ├── index.css
-        ├── main.tsx
-        ├── vite-env.d.ts
+        ├── App.tsx                 # Mode switcher: 5-Stop Pipeline vs Validation Dashboard
         ├── components/
-        │   ├── StatusBadge.tsx     # PASS / WARN / FAIL / PENDING pill badge
-        │   └── Stepper.tsx         # 5-stop horizontal pipeline stepper
-        ├── lib/
-        │   └── api.ts              # Typed fetch client reading VITE_API_URL
-        └── types/
-            └── case.ts             # Exact TS mirror of backend CaseReport schema
+        │   ├── Stepper.tsx         # 5-stop horizontal step indicator
+        │   ├── StatusBadge.tsx     # Medical PASS/WARN/FAIL badge
+        │   ├── MeshViewport3D.tsx  # Three.js 3D WebGL viewport (OrbitControls, raycasting)
+        │   ├── InspectStep.tsx     # Quad-view (Axial/Coronal/Sagittal + 3D) & CAD export
+        │   └── ValidationDashboard.tsx # Empirical benchmark runner & SVG charts
+        ├── lib/api.ts              # Fully typed backend API client
+        └── types/                  # Strict TS contracts (case.ts, benchmark.ts)
 ```
 
 ---
 
-## 3. Shared Data Contract (`CaseReport`)
+## 3. Quick Start
 
-Every case is persisted at `workspace/{case_id}/report.json`. Both `backend/app/models/schemas.py` and `frontend/src/types/case.ts` define this exact model:
+### Development Environment Setup (macOS Apple Silicon)
 
-```typescript
-interface CaseReport {
-  case_id: string;
-  created_at: string;
-  status: "pending" | "running" | "pass" | "warn" | "fail";
-  
-  scan: {
-    modality: "CT" | "MRI" | "UNKNOWN";
-    slice_count: number;
-    rows: number;
-    cols: number;
-    pixel_spacing_mm: [number, number];
-    declared_thickness_mm: number | null;
-  };
-
-  geometry: {
-    status: "PASS" | "WARN" | "FAIL" | "PENDING";
-    slices_reordered: boolean;
-    measured_spacing_mm: number | null;
-    spacing_mismatch_mm: number | null;
-    missing_slice_indices: number[];
-    gantry_tilt_deg: number;
-    isotropic_spacing_mm: number | null;
-    warnings: string[];
-  };
-
-  motion: {
-    status: "PASS" | "WARN" | "FAIL" | "PENDING";
-    applied: boolean;
-    per_slice_initial_shift_mm: number[];
-    per_slice_residual_shift_mm: number[];
-    max_residual_shift_mm: number | null;
-    flagged: boolean;
-  };
-
-  segmentation: {
-    status: "PASS" | "WARN" | "FAIL" | "PENDING";
-    model_used: string | null;
-    runtime_sec: number | null;
-    peak_vram_mb: number | null;
-    warnings: string[];
-  };
-
-  structures: Array<{
-    id: number;
-    name: string;
-    volume_mm3: number;
-    surface_area_mm2: number;
-    mean_thickness_mm: number | null;
-    intensity_mean: number;
-    intensity_std: number;
-    watertight: boolean;
-    manifold: boolean;
-    vertex_count: number;
-    face_count: number;
-    topology_components: number;
-    mesh_files: Record<string, string>;
-  }>;
-
-  stage_timings_sec: Record<string, number>;
-}
-```
-
----
-
-## 4. Development Setup
-
-### Prerequisites
-- macOS (Apple Silicon recommended)
+#### Prerequisites
+- macOS 13+ (Apple Silicon M1/M2/M3/M4)
 - Python 3.11+
-- Node.js 18+ (tested with Node v26)
+- Node.js 18+ & npm
 
-### Backend Setup & Test
 ```bash
-cd backend
+# 1. Clone repository
+git clone https://github.com/taruntechbs-code/slicem-dicom-3d.git
+cd slicem-dicom-3d
 
-# Create virtual environment and install dependencies
+# 2. Setup Backend Virtualenv
+cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cd ..
 
-# Run pytest suite
-pytest -v
-
-# Start development API server (port 8000)
-uvicorn app.main:app --reload --port 8000
+# 3. Setup Frontend Dependencies
+cd frontend
+npm install
+cd ..
 ```
 
-### Frontend Setup & Build
+### One-Command Unified Launch
+
+Start both the backend API and frontend development server with clean shutdown handling:
+
 ```bash
-cd frontend
+./scripts/start_slicem.sh
+```
 
-# Install npm dependencies
-npm install
+- **Frontend Application**: [http://localhost:5173](http://localhost:5173)
+- **Interactive Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Backend Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
 
-# Run TypeScript compilation and Vite production build
-npm run build
+---
 
-# Start local dev server (port 5173)
-npm run dev
+## 4. Testing & Verification
+
+### Running Automated Test Suite
+SliceM includes 21 comprehensive unit and integration tests covering phantom generation, gantry deskewing, motion registration, segmentation, watertight mesh validation, PDF generation, and benchmark endpoints:
+
+```bash
+backend/.venv/bin/pytest backend/tests/ -v
+```
+
+### Building Frontend Production Bundle
+```bash
+cd frontend && npm run build
 ```
 
 ---
 
-## 5. API Endpoints
+## 5. Benchmarks & Validation Suite
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/health` | Top-level health check (`{"status": "ok", "service": "slicem-backend", "version": "0.1.0"}`) |
-| `GET` | `/api/health` | API router health check |
-| `GET` | `/api/cases` | Scans `workspace/` and returns list of validated `CaseReport` objects |
-| `GET` | `/api/cases/{case_id}` | Returns single `CaseReport` by ID (HTTP 404 if missing) |
+SliceM includes an automated benchmark suite with rigorous clinical acceptance targets:
+- **Dice Similarity (DSC)**: $\ge 0.90$
+- **Mean Surface Distance (MSD)**: $\le 2.0\text{ mm}$
+- **95th Percentile Hausdorff (HD95)**: $\le 5.0\text{ mm}$
+- **Volume Error**: $\le 3.0\%$
+- **Execution Runtime**: $< 300\text{ s}$ (5 min on 12 GB GPU)
+
+### Run Synthetic Phantom Benchmark (3 Cases)
+```bash
+PYTHONPATH=backend backend/.venv/bin/python -m app.validation.run_benchmark --mode phantom
+```
+Outputs are recorded in `workspace/benchmarks/{run_id}/` in both CSV and JSON format and visualized in the frontend **Validation Dashboard**.
+
+### Run Clinical Dataset Benchmark
+```bash
+PYTHONPATH=backend backend/.venv/bin/python -m app.validation.run_benchmark \
+  --mode dataset \
+  --dataset-dir /path/to/paired_cases \
+  --engine totalsegmentator_fast
+```
+
+---
+
+## 6. ACDC Cardiac MRI Fine-Tuning (12 GB NVIDIA GPU)
+
+### 1. Dataset Preparation
+Convert standard ACDC challenge training folders into nnU-Net v2 `Dataset501_ACDC` format:
+```bash
+python scripts/prepare_acdc_nnunet.py \
+  --input-dir /path/to/acdc/database/training \
+  --output-dir ./nnUNet_raw/Dataset501_ACDC
+```
+
+### 2. GPU Training
+Run nnU-Net v2 preprocessing and 3D fullres training on a Linux 12 GB VRAM GPU:
+```bash
+./scripts/train_acdc_nnunet.sh
+```
+
+---
+
+## 7. 3D Slicer Cross-Check & Physical Parity
+
+SliceM provides a cross-check utility to verify coordinate system parity (LPS/RAS origin, spacing, bounding boxes, and volume) against 3D Slicer:
+
+```bash
+./scripts/check_slicer_parity.py --case-dir workspace/PRESET-clean-sphere/
+```
+
+### Verification Checklist:
+1. Open 3D Slicer (v5.0+).
+2. Drag and drop `volume_corrected.nii.gz` and `labels.nii.gz`.
+3. Import `meshes/*.stl` using Slicer's Models module.
+4. Verify physical 2D cross-sections: the STL surface boundary must align with the segmentation contour without any physical offset.
+
+---
+
+## 8. Instant Demo Presets
+
+SliceM includes 3 deterministic pre-computed presets accessible from Stop 1 (Load) for instantaneous evaluation (< 1s load):
+- **`clean-sphere`**: Clean 30 mm CT sphere phantom (all-PASS baseline).
+- **`tilted-12deg`**: 12° gantry tilt, scrambled order, spacing mismatch, 1-slice gap (demonstrates deskewing and mesh reconstruction).
+- **`motion-5mm`**: 5 mm slice-motion perturbed CT phantom (demonstrates slice-to-volume registration).
+
+---
+
+## 9. Regulatory Disclaimer & Licensing
+
+### Research & Non-Diagnostic Disclaimer
+> **IMPORTANT**: SliceM outputs support medical visualization, biomechanical simulation, 3D printing research, and pre-surgical planning discussion only. **SliceM is not cleared as a medical device and is not intended for primary clinical diagnosis or direct patient treatment.**
+
+### Third-Party Software & Licensing Notes
+- **Core Pipeline**: MIT License.
+- **PyMeshLab**: Licensed under GPL-3.0. SliceM provides a native, zero-dependency VTK + Trimesh decimation and hole-filling fallback for commercial non-GPL deployment pipelines.
+- **TotalSegmentator**: Licensed under Apache 2.0; please note that specific sub-models may have academic non-commercial terms.

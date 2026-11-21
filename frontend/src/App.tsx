@@ -21,7 +21,7 @@ import {
   Cpu,
 } from 'lucide-react';
 
-import { api, PhantomParams } from './lib/api';
+import { api, PhantomParams, PresetMeta } from './lib/api';
 import { CaseReport, HealthResponse } from './types/case';
 import { Stepper, STEPS } from './components/Stepper';
 import { StatusBadge } from './components/StatusBadge';
@@ -472,6 +472,27 @@ const LoadStepView: React.FC<LoadStepViewProps> = ({
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [presets, setPresets] = useState<PresetMeta[]>([]);
+  const [loadingPresetSlug, setLoadingPresetSlug] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.listPresets()
+      .then(setPresets)
+      .catch(() => {});
+  }, []);
+
+  const handleLoadPreset = async (slug: string) => {
+    setLoadingPresetSlug(slug);
+    setUploadError(null);
+    try {
+      const newCase = await api.loadPreset(slug);
+      onCaseCreated(newCase);
+    } catch (err: unknown) {
+      setUploadError(err instanceof Error ? err.message : `Failed to load preset '${slug}'`);
+    } finally {
+      setLoadingPresetSlug(null);
+    }
+  };
 
   // Phantom parameters
   const [shuffleFilenames, setShuffleFilenames] = useState<boolean>(true);
@@ -535,6 +556,60 @@ const LoadStepView: React.FC<LoadStepViewProps> = ({
           <span>{uploadError}</span>
         </div>
       )}
+
+      {/* Demo Presets (Instant Fallback) Section */}
+      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-cyan-400" />
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+              Demo Presets (Instant Fallback)
+            </h4>
+          </div>
+          <span className="text-[11px] font-mono text-slate-500">
+            Pre-computed &amp; verified end-to-end
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {presets.map((p) => {
+            const isLoading = loadingPresetSlug === p.slug;
+            return (
+              <button
+                key={p.slug}
+                onClick={() => handleLoadPreset(p.slug)}
+                disabled={isLoading || loadingPresetSlug !== null}
+                className="p-3.5 rounded-lg bg-slate-950/80 hover:bg-slate-900 border border-slate-800 hover:border-cyan-500/50 text-left transition-all group flex flex-col justify-between gap-3 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-white group-hover:text-cyan-300 transition-colors">
+                      {p.title}
+                    </span>
+                    <span
+                      className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                        p.cached
+                          ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/40'
+                          : 'bg-cyan-950 text-cyan-400 border border-cyan-800/40'
+                      }`}
+                    >
+                      {p.cached ? 'Cached' : 'Generate'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1 line-clamp-2 leading-relaxed">
+                    {p.description}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] font-mono text-cyan-400 group-hover:text-cyan-300 pt-1 border-t border-slate-800/80">
+                  <span>{isLoading ? 'Computing Pipeline...' : 'Load Case →'}</span>
+                  {isLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Card A: DICOM Upload Zone */}
