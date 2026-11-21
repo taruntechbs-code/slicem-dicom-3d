@@ -85,9 +85,7 @@ def inject_slice_motion(
             shifted_slices.append(slice_2d)
 
     perturbed_img = sitk.JoinSeries(shifted_slices)
-    perturbed_img.SetSpacing(img.GetSpacing())
-    perturbed_img.SetOrigin(img.GetOrigin())
-    perturbed_img.SetDirection(img.GetDirection())
+    perturbed_img.CopyInformation(img)
 
     return perturbed_img, shift_magnitudes_mm
 
@@ -209,9 +207,7 @@ def correct_slice_motion(
         reference_slice = aligned_slice
 
     corrected_img = sitk.JoinSeries(aligned_slices)
-    corrected_img.SetSpacing(img.GetSpacing())
-    corrected_img.SetOrigin(img.GetOrigin())
-    corrected_img.SetDirection(img.GetDirection())
+    corrected_img.CopyInformation(img)
 
     max_residual = float(max(residual_shifts_mm)) if residual_shifts_mm else 0.0
     flagged = max_residual > min_voxel_spacing

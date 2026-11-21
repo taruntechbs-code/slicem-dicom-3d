@@ -83,9 +83,7 @@ def compute_structure_analytics(
             continue
 
         bin_img = sitk.GetImageFromArray(bin_arr)
-        bin_img.SetSpacing(labels_img.GetSpacing())
-        bin_img.SetOrigin(labels_img.GetOrigin())
-        bin_img.SetDirection(labels_img.GetDirection())
+        bin_img.CopyInformation(labels_img)
 
         # Intensity statistics inside structure mask
         intensities = vol_arr[bin_arr > 0]

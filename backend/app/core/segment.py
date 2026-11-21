@@ -105,12 +105,17 @@ def cleanup_and_check_topology(
 
         # Keep primary component (index 1) always, and secondary components >= threshold
         kept_mask = sitk.Image(bin_img.GetSize(), sitk.sitkUInt8)
+        kept_mask.CopyInformation(bin_img)
         for idx, sz in enumerate(sizes, 1):
             if idx == 1 or sz >= stray_threshold:
-                kept_mask = sitk.Or(kept_mask, sitk.Equal(rel_img, idx))
+                comp = sitk.Equal(rel_img, idx)
+                comp.CopyInformation(bin_img)
+                kept_mask.CopyInformation(bin_img)
+                kept_mask = sitk.Or(kept_mask, comp)
 
         # Re-verify component count after cleanup
         cc_after = sitk.ConnectedComponentImageFilter()
+        kept_mask.CopyInformation(bin_img)
         cc_after.Execute(kept_mask)
         final_components = int(cc_after.GetObjectCount())
 
@@ -130,9 +135,7 @@ def cleanup_and_check_topology(
         }
 
     cleaned_label_img = sitk.GetImageFromArray(cleaned_arr)
-    cleaned_label_img.SetSpacing(label_img.GetSpacing())
-    cleaned_label_img.SetOrigin(label_img.GetOrigin())
-    cleaned_label_img.SetDirection(label_img.GetDirection())
+    cleaned_label_img.CopyInformation(label_img)
 
     return cleaned_label_img, topology_meta, warnings
 
@@ -207,9 +210,7 @@ def _segment_totalsegmentator(
     label_img = sitk.GetImageFromArray(seg_arr_sitk)
 
     ref_img = sitk.ReadImage(str(volume_path))
-    label_img.SetSpacing(ref_img.GetSpacing())
-    label_img.SetOrigin(ref_img.GetOrigin())
-    label_img.SetDirection(ref_img.GetDirection())
+    label_img.CopyInformation(ref_img)
 
     unique_ids = [int(x) for x in np.unique(seg_arr_sitk) if x > 0]
     label_names = {uid: f"structure_{uid}" for uid in unique_ids}
@@ -317,6 +318,7 @@ def run_segmentation(
         raw_label_img,
         label_names,
     )
+    cleaned_label_img.CopyInformation(raw_label_img)
 
     # Persist cleaned labels.nii.gz
     labels_path = case_dir / "labels.nii.gz"

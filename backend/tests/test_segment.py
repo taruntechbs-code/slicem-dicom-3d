@@ -179,3 +179,119 @@ def test_api_segmentation_and_overlay(tmp_path: Path, monkeypatch: pytest.Monkey
     ov_cor = client.get(f"/api/cases/{case_id}/overlay/coronal/64")
     assert ov_cor.status_code == 200
     assert ov_cor.headers["content-type"] == "image/png"
+
+
+def test_segmentation_with_clinical_nonzero_origin(tmp_path: Path):
+    """Regression test for clinical DICOM scans with non-zero physical origin and spacing.
+
+    Verifies:
+      - cleanup_and_check_topology succeeds without OrImageFilter physical space mismatch error
+      - run_segmentation(..., engine="phantom_threshold") executes cleanly
+      - labels.nii.gz preserves exact physical origin (-125.0, -123.54, 5.836)
+      - segmentation.status == "PASS"
+    """
+    case_dir = tmp_path / "clinical_case"
+    case_dir.mkdir(parents=True, exist_ok=True)
+
+    origin = (-125.0, -123.54, 5.836)
+    spacing = (0.75, 0.75, 1.5)
+
+    # 1. Create a synthetic test volume with sphere (+400 HU inside, -1000 HU background)
+    vol_arr = np.full((30, 64, 64), -1000.0, dtype=np.float32)
+    z, y, x = np.ogrid[:30, :64, :64]
+    sphere_mask = (x - 32) ** 2 + (y - 32) ** 2 + (z - 15) ** 2 <= 10**2
+    vol_arr[sphere_mask] = 400.0
+
+    vol_img = sitk.GetImageFromArray(vol_arr)
+    vol_img.SetOrigin(origin)
+    vol_img.SetSpacing(spacing)
+    vol_img.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+
+    # Save volume_corrected.nii.gz
+    vol_path = case_dir / "volume_corrected.nii.gz"
+    sitk.WriteImage(vol_img, str(vol_path))
+
+    # 2. Test cleanup_and_check_topology directly with non-zero origin
+    label_arr = np.zeros(vol_arr.shape, dtype=np.uint16)
+    label_arr[sphere_mask] = 1
+    # Add a stray 5-voxel island in corner
+    label_arr[2, 2:4, 2:4] = 1
+    label_arr[3, 2, 2] = 1
+
+    label_img = sitk.GetImageFromArray(label_arr)
+    label_img.CopyInformation(vol_img)
+    assert label_img.GetOrigin() == origin
+
+    cleaned_img, meta, warnings = cleanup_and_check_topology(label_img, {1: "clinical_structure"})
+    assert cleaned_img.GetOrigin() == origin
+    assert cleaned_img.GetSpacing() == spacing
+    assert meta[1]["final_components"] == 1
+
+    # 3. Create minimal report.json for case
+    from app.models.schemas import CaseReport, GeometryReport, MotionReport, ScanReport, SegmentationReport
+
+    report = CaseReport(
+        case_id="CASE-CLINICAL-ORIGIN",
+        created_at="2026-11-21T18:00:00Z",
+        status="pass",
+        scan=ScanReport(
+            modality="CT",
+            slice_count=30,
+            rows=64,
+            cols=64,
+            pixel_spacing_mm=[0.75, 0.75],
+            declared_thickness_mm=1.5,
+        ),
+        geometry=GeometryReport(
+            status="PASS",
+            slices_reordered=False,
+            measured_spacing_mm=1.5,
+            spacing_mismatch_mm=0.0,
+            missing_slice_indices=[],
+            gantry_tilt_deg=0.0,
+            isotropic_spacing_mm=1.5,
+            warnings=[],
+        ),
+        motion=MotionReport(
+            status="PASS",
+            applied=False,
+            per_slice_initial_shift_mm=[],
+            per_slice_residual_shift_mm=[],
+            max_residual_shift_mm=0.0,
+            flagged=False,
+        ),
+        segmentation=SegmentationReport(
+            status="PENDING",
+            model_used=None,
+            runtime_sec=None,
+            peak_vram_mb=None,
+            warnings=[],
+        ),
+        structures=[],
+        stage_timings_sec={},
+    )
+    (case_dir / "report.json").write_text(report.model_dump_json(indent=2))
+
+    # 4. Run run_segmentation
+    result_report = run_segmentation(case_dir, engine="phantom_threshold")
+    assert result_report.segmentation.status == "PASS"
+    assert len(result_report.structures) == 1
+
+    # Verify saved labels.nii.gz preserved exact origin and spacing
+    saved_labels = sitk.ReadImage(str(case_dir / "labels.nii.gz"))
+    assert np.allclose(saved_labels.GetOrigin(), origin, atol=1e-5)
+    assert np.allclose(saved_labels.GetSpacing(), spacing, atol=1e-5)
+
+    # 5. Also verify Stops 4 & 5 (Meshing and Analytics) succeed with non-zero origin
+    from app.core.analytics import compute_structure_analytics
+    from app.core.mesh import generate_structure_meshes
+
+    mesh_results = generate_structure_meshes(case_dir)
+    assert len(mesh_results) == 1
+    assert mesh_results[0]["watertight"] is True
+
+    final_report = compute_structure_analytics(case_dir, mesh_results)
+    assert len(final_report.structures) == 1
+    assert final_report.structures[0].watertight is True
+    assert final_report.structures[0].mean_thickness_mm is not None
+
