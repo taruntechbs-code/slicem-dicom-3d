@@ -159,6 +159,11 @@ def test_api_correction_and_orthogonal_slices(tmp_path: Path, monkeypatch: pytes
     case_data = post_res.json()
     case_id = case_data["case_id"]
 
+    # Verify 404 before correction has been executed
+    pre_slice_res = client.get(f"/api/cases/{case_id}/slice/corrected/axial/0")
+    assert pre_slice_res.status_code == 404
+    assert "Corrected volume not generated yet" in pre_slice_res.json()["detail"]
+
     # 2. Run POST /api/cases/{id}/correct
     corr_res = client.post(
         f"/api/cases/{case_id}/correct",

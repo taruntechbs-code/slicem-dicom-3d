@@ -48,7 +48,7 @@ const FALLBACK_DEMO_CASE: CaseReport = {
     spacing_mismatch_mm: 0.0,
     missing_slice_indices: [],
     gantry_tilt_deg: 0.0,
-    isotropic_spacing_mm: 1.0,
+    isotropic_spacing_mm: null,
     warnings: [],
   },
   motion: {
@@ -137,7 +137,7 @@ export const App: React.FC = () => {
       <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 lg:px-8 py-3">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           {/* Logo & Brand */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0">
             <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 shadow-md shadow-cyan-500/20 text-slate-950 font-black">
               <Layers className="w-5 h-5 text-white" />
             </div>
@@ -147,7 +147,7 @@ export const App: React.FC = () => {
                 <span className="text-[10px] uppercase font-mono tracking-widest px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/30 text-cyan-300">
                   3D DICOM
                 </span>
-                <span className="text-xs text-slate-500 font-mono hidden sm:inline">Phase 1</span>
+                <span className="text-xs text-slate-500 font-mono hidden sm:inline">v1.0</span>
               </div>
               <p className="text-xs text-slate-400 hidden sm:block">
                 Geometry-First Anatomical Reconstruction Pipeline
@@ -156,8 +156,8 @@ export const App: React.FC = () => {
           </div>
 
           {/* Center: Mode Switcher & Active Case */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center p-0.5 rounded-lg bg-slate-950/80 border border-slate-800">
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center p-0.5 rounded-lg bg-slate-950/80 border border-slate-800 shrink-0">
               <button
                 onClick={() => setAppMode('pipeline')}
                 className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${
@@ -184,7 +184,7 @@ export const App: React.FC = () => {
 
             {/* Active Case Quick Switcher (visible in pipeline mode) */}
             {appMode === 'pipeline' && (
-              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/60 text-xs">
+              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/60 text-xs whitespace-nowrap shrink-0">
                 <Database className="w-3.5 h-3.5 text-slate-400" />
                 <span className="text-slate-400">Case:</span>
                 <span className="font-mono font-medium text-cyan-300">{activeCase.case_id}</span>
@@ -195,7 +195,7 @@ export const App: React.FC = () => {
           </div>
 
           {/* Right: Live Backend Indicator & Actions */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0">
             <button
               onClick={() => {
                 checkHealth();
@@ -209,7 +209,7 @@ export const App: React.FC = () => {
 
             {/* Backend Status Pill */}
             <div
-              className={`flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-mono transition-all ${
+              className={`flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-mono transition-all whitespace-nowrap shrink-0 ${
                 isBackendConnected === true
                   ? 'bg-emerald-950/60 border-emerald-500/30 text-emerald-300'
                   : isBackendConnected === false
@@ -240,7 +240,7 @@ export const App: React.FC = () => {
 
             <button
               onClick={() => setShowJsonModal(true)}
-              className="px-2.5 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-mono text-slate-300 hover:text-white flex items-center gap-1.5 transition-colors"
+              className="px-2.5 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-mono text-slate-300 hover:text-white flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0"
             >
               <Terminal className="w-3.5 h-3.5 text-cyan-400" />
               <span className="hidden sm:inline">Contract JSON</span>
@@ -1079,55 +1079,78 @@ const CorrectStepView: React.FC<CorrectStepViewProps> = ({
   const [axis, setAxis] = useState<'axial' | 'coronal' | 'sagittal'>(() =>
     Math.abs(g.gantry_tilt_deg) > 0.5 ? 'sagittal' : 'axial'
   );
-  const [sliceIndex, setSliceIndex] = useState<number>(() => {
-    if (Math.abs(g.gantry_tilt_deg) > 0.5) return Math.floor((scan.cols || 128) / 2);
-    return Math.floor((scan.slice_count || 60) / 2);
+
+  const isCorrected = g.isotropic_spacing_mm !== null;
+
+  const [rawSliceCount, setRawSliceCount] = useState<number>(() => {
+    if (axis === 'axial') return scan.slice_count || 60;
+    if (axis === 'coronal') return scan.rows || 128;
+    return scan.cols || 128;
   });
-  const [maxSlices, setMaxSlices] = useState<number>(() => {
-    if (Math.abs(g.gantry_tilt_deg) > 0.5) return scan.cols || 128;
-    return scan.slice_count || 60;
+
+  const [corrSliceCount, setCorrSliceCount] = useState<number>(() => {
+    if (axis === 'axial') return Math.round((scan.slice_count || 60) * 2);
+    if (axis === 'coronal') return scan.rows || 128;
+    return scan.cols || 128;
   });
+
+  // Shared normalized slider position: 0 to 100 percent
+  const [sliderPercent, setSliderPercent] = useState<number>(50);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [rawImageError, setRawImageError] = useState<boolean>(false);
   const [correctedImageError, setCorrectedImageError] = useState<boolean>(false);
 
-  // Update slice count dynamically from backend X-Slice-Count header
+  // Update slice counts dynamically from backend X-Slice-Count header
   useEffect(() => {
     let isMounted = true;
-    const fetchCount = async () => {
-      const stage = m.applied ? 'corrected' : 'raw';
-      const count = await api.fetchSliceCount(activeCase.case_id, stage, axis);
-      if (isMounted && count > 0) {
-        setMaxSlices(count);
-        setSliceIndex((prev) => Math.min(prev, count - 1));
+    const updateCounts = async () => {
+      try {
+        const rCount = await api.fetchSliceCount(activeCase.case_id, 'raw', axis);
+        if (isMounted && rCount > 0) {
+          setRawSliceCount(rCount);
+        }
+      } catch {
+        // preserve default
+      }
+
+      if (isCorrected) {
+        try {
+          const cCount = await api.fetchSliceCount(activeCase.case_id, 'corrected', axis);
+          if (isMounted && cCount > 0) {
+            setCorrSliceCount(cCount);
+          }
+        } catch {
+          // preserve default
+        }
       }
     };
-    fetchCount();
+
+    updateCounts();
     setRawImageError(false);
     setCorrectedImageError(false);
     return () => {
       isMounted = false;
     };
-  }, [axis, activeCase.case_id, m.applied]);
+  }, [axis, activeCase.case_id, isCorrected]);
 
   // Cinematic slice playback
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
-    if (isPlaying && maxSlices > 1) {
+    if (isPlaying) {
       timer = setInterval(() => {
-        setSliceIndex((prev) => (prev + 1) % maxSlices);
+        setSliderPercent((prev) => (prev + 1) % 101);
       }, 70);
     }
     return () => {
       if (timer) clearInterval(timer);
     };
-  }, [isPlaying, maxSlices]);
+  }, [isPlaying]);
 
-  // Clear image load error states on slice change
+  // Clear image load error states on slice position change
   useEffect(() => {
     setRawImageError(false);
     setCorrectedImageError(false);
-  }, [sliceIndex]);
+  }, [sliderPercent]);
 
   const handleRunCorrection = async () => {
     setIsRunning(true);
@@ -1146,8 +1169,13 @@ const CorrectStepView: React.FC<CorrectStepViewProps> = ({
     }
   };
 
-  const rawUrl = api.getOrthogonalSliceUrl(activeCase.case_id, 'raw', axis, sliceIndex);
-  const correctedUrl = api.getOrthogonalSliceUrl(activeCase.case_id, 'corrected', axis, sliceIndex);
+  // Matched physical indices
+  const t = sliderPercent / 100.0;
+  const rawIdx = Math.max(0, Math.min(rawSliceCount - 1, Math.round(t * (rawSliceCount - 1))));
+  const corrIdx = Math.max(0, Math.min(corrSliceCount - 1, Math.round(t * (corrSliceCount - 1))));
+
+  const rawUrl = api.getOrthogonalSliceUrl(activeCase.case_id, 'raw', axis, rawIdx);
+  const correctedUrl = isCorrected ? api.getOrthogonalSliceUrl(activeCase.case_id, 'corrected', axis, corrIdx) : '';
 
   // SVG Bar Chart Data
   const initialShifts = m.per_slice_initial_shift_mm || [];
@@ -1300,9 +1328,9 @@ const CorrectStepView: React.FC<CorrectStepViewProps> = ({
         <div className="flex items-center gap-4 bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
           <div className="flex items-center gap-1.5">
             <button
-              onClick={() => setSliceIndex((prev) => Math.max(0, prev - 1))}
+              onClick={() => setSliderPercent((prev) => Math.max(0, prev - 1))}
               className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors"
-              title="Previous Slice"
+              title="Previous Position"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -1314,29 +1342,30 @@ const CorrectStepView: React.FC<CorrectStepViewProps> = ({
               <span>{isPlaying ? 'Pause' : 'Cinematic'}</span>
             </button>
             <button
-              onClick={() => setSliceIndex((prev) => Math.min(maxSlices - 1, prev + 1))}
+              onClick={() => setSliderPercent((prev) => Math.min(100, prev + 1))}
               className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors"
-              title="Next Slice"
+              title="Next Position"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
 
           <div className="flex-1 flex items-center gap-3">
-            <span className="text-[11px] font-mono text-slate-500">0</span>
+            <span className="text-[11px] font-mono text-slate-500">1</span>
             <input
               type="range"
               min={0}
-              max={Math.max(0, maxSlices - 1)}
-              value={sliceIndex}
-              onChange={(e) => setSliceIndex(Number(e.target.value))}
+              max={100}
+              value={sliderPercent}
+              onChange={(e) => setSliderPercent(Number(e.target.value))}
               className="flex-1 accent-cyan-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
             />
-            <span className="text-[11px] font-mono text-slate-500">{maxSlices - 1}</span>
+            <span className="text-[11px] font-mono text-slate-500">100%</span>
           </div>
 
-          <div className="text-xs font-mono text-cyan-300 bg-cyan-950/60 px-2.5 py-1 rounded border border-cyan-500/30">
-            {axis.toUpperCase()} · Slice {sliceIndex + 1} / {maxSlices}
+          <div className="text-xs font-mono text-cyan-300 bg-cyan-950/60 px-2.5 py-1 rounded border border-cyan-500/30 whitespace-nowrap">
+            {axis.toUpperCase()} · RAW {rawIdx + 1} / {rawSliceCount}
+            {isCorrected && ` | CORRECTED ${corrIdx + 1} / ${corrSliceCount}`}
           </div>
         </div>
 
@@ -1367,13 +1396,13 @@ const CorrectStepView: React.FC<CorrectStepViewProps> = ({
               ) : (
                 <img
                   src={rawUrl}
-                  alt={`Raw ${axis} slice ${sliceIndex}`}
+                  alt={`Raw ${axis} slice ${rawIdx + 1}`}
                   onError={() => setRawImageError(true)}
                   className="w-full h-full object-contain select-none"
                 />
               )}
               <div className="absolute top-2 left-2 text-[10px] font-mono text-amber-300/90 bg-slate-950/80 px-2 py-0.5 rounded border border-amber-500/30 pointer-events-none">
-                RAW · {axis.toUpperCase()} #{sliceIndex}
+                RAW · {axis.toUpperCase()} {rawIdx + 1} / {rawSliceCount}
               </div>
               {Math.abs(g.gantry_tilt_deg) > 0.5 && axis === 'sagittal' && (
                 <div className="absolute bottom-2 left-2 text-[10px] font-mono text-amber-300/90 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-500/40 pointer-events-none">
@@ -1393,19 +1422,19 @@ const CorrectStepView: React.FC<CorrectStepViewProps> = ({
                 </h4>
               </div>
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-500/30">
-                {m.applied
+                {isCorrected
                   ? `Isotropic ${(g.isotropic_spacing_mm || isotropicSpacing).toFixed(1)} mm`
                   : 'Pending Run'}
               </span>
             </div>
 
             <div className="relative aspect-square max-h-80 w-full mx-auto rounded-lg bg-black border border-slate-800 flex items-center justify-center overflow-hidden">
-              {!m.applied ? (
+              {!isCorrected ? (
                 <div className="text-center p-6 space-y-3">
                   <RefreshCw className="w-8 h-8 text-cyan-400 mx-auto opacity-60" />
-                  <div className="text-xs font-medium text-slate-300">Volume Not Corrected Yet</div>
-                  <p className="text-[11px] text-slate-500 max-w-xs">
-                    Click <strong className="text-cyan-300 font-mono">Run Correction</strong> above to apply affine deskewing and slice-by-slice rigid registration.
+                  <div className="text-xs font-medium text-slate-200">Volume Not Corrected Yet</div>
+                  <p className="text-[11px] text-slate-400 max-w-xs leading-relaxed">
+                    Run Correction to generate the deskewed isotropic volume.
                   </p>
                 </div>
               ) : correctedImageError ? (
@@ -1416,17 +1445,17 @@ const CorrectStepView: React.FC<CorrectStepViewProps> = ({
               ) : (
                 <img
                   src={correctedUrl}
-                  alt={`Corrected ${axis} slice ${sliceIndex}`}
+                  alt={`Corrected ${axis} slice ${corrIdx + 1}`}
                   onError={() => setCorrectedImageError(true)}
                   className="w-full h-full object-contain select-none"
                 />
               )}
-              {m.applied && (
+              {isCorrected && (
                 <div className="absolute top-2 left-2 text-[10px] font-mono text-emerald-300/90 bg-slate-950/80 px-2 py-0.5 rounded border border-emerald-500/30 pointer-events-none">
-                  CORRECTED · {axis.toUpperCase()} #{sliceIndex}
+                  CORRECTED · {axis.toUpperCase()} {corrIdx + 1} / {corrSliceCount}
                 </div>
               )}
-              {m.applied && axis === 'sagittal' && (
+              {isCorrected && axis === 'sagittal' && (
                 <div className="absolute bottom-2 left-2 text-[10px] font-mono text-emerald-300/90 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/40 pointer-events-none">
                   Straightened Orthogonal Frame
                 </div>

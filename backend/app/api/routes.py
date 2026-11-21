@@ -377,14 +377,10 @@ def get_orthogonal_slice(case_id: str, stage: str, axis: str, index: int) -> Res
             sitk_img = sitk.ReadImage(str(iso_path))
             vol = sitk.GetArrayFromImage(sitk_img)
         else:
-            # Fallback to raw if correction hasn't been run yet
-            raw_path = case_dir / "volume_raw.npy"
-            if not raw_path.is_file():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="No volume data found for case",
-                )
-            vol = np.load(str(raw_path))
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Corrected volume not generated yet. Run Correction first.",
+            )
 
     # 2. Extract slice along requested anatomical plane
     # Array shape is (Z, Y, X) -> Z=axial, Y=coronal, X=sagittal
