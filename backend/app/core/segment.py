@@ -231,9 +231,15 @@ def _segment_totalsegmentator(
             pass
 
     # 3. Determine device
+    # If running on Hugging Face Spaces (SPACE_ID is set), force TotalSegmentator subprocess to "cpu"
+    # because ZeroGPU's dynamic CUDA emulation is only active inside functions decorated with @spaces.GPU,
+    # and unmanaged subprocesses attempting --device gpu will fail or hang.
+    # Otherwise:
     # If CUDA is available -> "gpu"
     # Else if Apple Silicon MPS is available -> "mps"
     # Else -> "cpu"
+    is_hf_space = bool(os.getenv("SPACE_ID"))
+
     cuda_available = False
     mps_available = False
     try:
@@ -244,7 +250,9 @@ def _segment_totalsegmentator(
     except Exception:
         pass
 
-    if cuda_available:
+    if is_hf_space:
+        target_device = "cpu"
+    elif cuda_available:
         target_device = "gpu"
     elif mps_available:
         target_device = "mps"

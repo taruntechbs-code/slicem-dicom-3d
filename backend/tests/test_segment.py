@@ -770,3 +770,83 @@ def test_totalsegmentator_mps_selection_and_cpu_fallback(tmp_path: Path, monkeyp
     assert "CUDA GPU (4096 MB VRAM)" in unescaped_cuda
 
 
+def test_totalsegmentator_forces_cpu_on_hf_spaces(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Verify that TotalSegmentator forces --device cpu when SPACE_ID is set (Hugging Face Spaces)."""
+    import subprocess
+    import torch
+    from app.models.schemas import CaseReport, GeometryReport, MotionReport, ScanReport, SegmentationReport
+
+    # Emulate Hugging Face ZeroGPU environment where CUDA is emulated/intercepted
+    monkeypatch.setenv("SPACE_ID", "tarun00000007/slicem-api")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+
+    case_dir = tmp_path / "case_hf_space"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    vol_img = sitk.GetImageFromArray(np.zeros((8, 16, 16), dtype=np.float32))
+    vol_img.SetSpacing((1.0, 1.0, 1.0))
+    sitk.WriteImage(vol_img, str(case_dir / "volume_iso.nii.gz"))
+
+    report = CaseReport(
+        case_id="TEST-HF-SPACE",
+        created_at="2026-11-22T00:00:00Z",
+        status="pass",
+        scan=ScanReport(
+            modality="CT",
+            slice_count=8,
+            rows=16,
+            cols=16,
+            pixel_spacing_mm=[1.0, 1.0],
+            declared_thickness_mm=1.0,
+        ),
+        geometry=GeometryReport(
+            status="PASS",
+            slices_reordered=False,
+            measured_spacing_mm=1.0,
+            spacing_mismatch_mm=0.0,
+            missing_slice_indices=[],
+            gantry_tilt_deg=0.0,
+            isotropic_spacing_mm=1.0,
+            warnings=[],
+        ),
+        motion=MotionReport(
+            status="PASS",
+            applied=False,
+            per_slice_initial_shift_mm=[],
+            per_slice_residual_shift_mm=[],
+            max_residual_shift_mm=0.0,
+            flagged=False,
+        ),
+        segmentation=SegmentationReport(
+            status="PENDING",
+            model_used=None,
+            runtime_sec=None,
+            peak_vram_mb=None,
+            warnings=[],
+        ),
+        structures=[],
+        stage_timings_sec={},
+    )
+    (case_dir / "report.json").write_text(report.model_dump_json(indent=2))
+
+    captured_cmds = []
+
+    def mock_hf_run(cmd, capture_output=True, text=True, env=None):
+        captured_cmds.append(list(cmd))
+        out_idx = cmd.index("-o") + 1
+        out_path = Path(cmd[out_idx])
+        lbl_arr = np.zeros((8, 16, 16), dtype=np.uint16)
+        lbl_arr[2:6, 4:12, 4:12] = 5  # liver
+        fake_lbl = sitk.GetImageFromArray(lbl_arr)
+        fake_lbl.SetSpacing((1.0, 1.0, 1.0))
+        sitk.WriteImage(fake_lbl, str(out_path))
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="CPU Success", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", mock_hf_run)
+
+    res_report = run_segmentation(case_dir, engine="totalsegmentator_fast")
+    assert len(captured_cmds) == 1
+    assert captured_cmds[0][captured_cmds[0].index("--device") + 1] == "cpu"
+    assert res_report.segmentation.device == "cpu"
+    assert res_report.segmentation.device_used == "cpu"
+
+
