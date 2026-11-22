@@ -138,11 +138,11 @@ export const App: React.FC = () => {
     <div className="min-h-screen bg-black text-[#F5F5F7] flex flex-col font-sans selection:bg-[#0A84FF]/30 selection:text-white">
       {/* ─── Sticky Frosted Top Bar (52px single row, Apple Pro aesthetic) ─── */}
       <header className="sticky top-0 z-50 h-[52px] bg-black/75 backdrop-blur-xl border-b border-white/10 px-6 whitespace-nowrap">
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center max-w-7xl mx-auto h-full">
-          {/* Left column (justify-self-start): Clean SliceM wordmark + tiny 6px backend status dot */}
+        <div className="relative max-w-7xl mx-auto h-full flex items-center justify-between">
+          {/* Left: Clean SliceM wordmark + tiny 6px backend status dot */}
           <div
             onClick={() => setAppMode('overview')}
-            className="justify-self-start flex items-center gap-2.5 shrink-0 cursor-pointer group"
+            className="flex items-center gap-2.5 shrink-0 cursor-pointer group"
           >
             <span className="text-sm font-semibold tracking-tight text-[#F5F5F7] group-hover:text-white transition-colors">
               SliceM
@@ -163,8 +163,8 @@ export const App: React.FC = () => {
             />
           </div>
 
-          {/* Center column (justify-self-center): Pixel-locked toggle bar */}
-          <div className="justify-self-center flex items-center p-0.5 rounded-full bg-[#101012] border border-white/10 shrink-0">
+          {/* Center: Absolute hard-centered toggle bar (guaranteed 0px shift) */}
+          <div className="absolute left-1/2 -translate-x-1/2 flex items-center p-0.5 rounded-full bg-[#101012] border border-white/10 shrink-0">
             <button
               onClick={() => setAppMode('overview')}
               className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
@@ -197,12 +197,12 @@ export const App: React.FC = () => {
             </button>
           </div>
 
-          {/* Right column (justify-self-end min-w-[160px] flex justify-end): Context-aware action */}
-          <div className="justify-self-end min-w-[160px] flex items-center justify-end gap-2.5 shrink-0">
+          {/* Right: Constrained Action Slot (max-w-[220px] to protect center) */}
+          <div className="flex items-center justify-end gap-2.5 shrink-0 max-w-[220px]">
             {appMode === 'overview' ? (
               <button
                 onClick={() => setAppMode('pipeline')}
-                className="bg-[#0071E3] hover:bg-[#0077ED] text-white text-xs font-medium px-3.5 py-1.5 rounded-full transition-all duration-200 shadow-sm"
+                className="bg-[#0071E3] hover:bg-[#0077ED] text-white text-xs font-medium px-3.5 py-1.5 rounded-full transition-all duration-200 shadow-sm whitespace-nowrap"
               >
                 Launch Workspace
               </button>
@@ -216,7 +216,7 @@ export const App: React.FC = () => {
                     setAppMode('pipeline');
                   }
                 }}
-                className="bg-[#1C1C1E] border border-white/10 text-[#F5F5F7] text-xs font-mono rounded-full px-3 py-1 outline-none hover:bg-[#2C2C2E] transition-colors cursor-pointer"
+                className="bg-[#1C1C1E] border border-white/10 text-[#F5F5F7] text-xs font-mono rounded-full px-3 py-1 outline-none hover:bg-[#2C2C2E] transition-colors cursor-pointer truncate max-w-[190px]"
               >
                 {cases.map((c) => (
                   <option key={c.case_id} value={c.case_id}>
@@ -225,7 +225,7 @@ export const App: React.FC = () => {
                 ))}
               </select>
             ) : (
-              <span className="text-[11px] font-mono text-[#86868B]">Workspace Ready</span>
+              <span className="text-[11px] font-mono text-[#86868B] whitespace-nowrap">Workspace Ready</span>
             )}
           </div>
         </div>

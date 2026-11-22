@@ -73,19 +73,25 @@ function useScrollReveal<T extends HTMLElement = HTMLDivElement>() {
 }
 
 /**
- * Frameless Three.js 3D DICOM Volumetric Showcase for the Hero.
- * Stacked translucent axial CT slice planes intersecting a refined matte-and-rim-lit
- * anatomical isosurface mesh with an animated vertical laser scan plane.
+ * Apple-Level Interactive "Slice-to-Solid" Showcase for the Hero.
+ * Demonstrates SliceM transforming 2D DICOM axial slice contours into a silky,
+ * watertight 3D anatomical solid via real-time clipping-plane scan reveal.
  */
 const HeroShowcase3D: React.FC = () => {
   const mountRef = useRef<HTMLDivElement>(null);
+  const [displayMode, setDisplayMode] = useState<'scan' | 'slices' | 'solid'>('scan');
+  const modeRef = useRef<'scan' | 'slices' | 'solid'>('scan');
+
+  useEffect(() => {
+    modeRef.current = displayMode;
+  }, [displayMode]);
 
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
 
     let width = container.clientWidth || 800;
-    let height = container.clientHeight || 520;
+    let height = container.clientHeight || 480;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
@@ -96,7 +102,9 @@ const HeroShowcase3D: React.FC = () => {
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.2;
+    renderer.toneMappingExposure = 1.25;
+    // Enable local clipping planes for dynamic slice-to-solid transitions
+    renderer.localClippingEnabled = true;
     container.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -105,50 +113,145 @@ const HeroShowcase3D: React.FC = () => {
     controls.enableZoom = false;
     controls.enablePan = false;
     controls.autoRotate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    controls.autoRotateSpeed = 0.7;
+    controls.autoRotateSpeed = 0.75;
     controls.maxPolarAngle = Math.PI / 1.75;
     controls.minPolarAngle = Math.PI / 2.75;
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.35);
+    // Studio 3-point lighting + crisp cyan rim lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
     scene.add(ambientLight);
 
-    const keyLight = new THREE.DirectionalLight(0xffffff, 1.15);
-    keyLight.position.set(6, 10, 8);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.3);
+    keyLight.position.set(8, 12, 10);
     scene.add(keyLight);
 
-    const rimLight = new THREE.DirectionalLight(0x38bdf8, 2.8);
-    rimLight.position.set(-8, 5, -7);
+    const rimLight = new THREE.DirectionalLight(0x38bdf8, 3.2);
+    rimLight.position.set(-9, 6, -8);
     scene.add(rimLight);
 
-    const fillLight = new THREE.DirectionalLight(0x0ea5e9, 0.45);
-    fillLight.position.set(2, -6, 4);
+    const fillLight = new THREE.DirectionalLight(0x0a84ff, 0.6);
+    fillLight.position.set(3, -6, 5);
     scene.add(fillLight);
+
+    const topAccent = new THREE.DirectionalLight(0x60a5fa, 0.8);
+    topAccent.position.set(0, 8, 2);
+    scene.add(topAccent);
 
     const modelGroup = new THREE.Group();
     scene.add(modelGroup);
 
-    // ─── Stacked Translucent Axial CT Slice Planes ──────────────────────
-    const sliceCount = 8;
-    const sliceSpacing = 0.32;
-    const sliceWidth = 2.6;
-    const sliceDepth = 1.9;
+    // Dynamic clipping planes
+    // Solid is retained below the scan plane: y <= scanY <=> (0, -1, 0) · p + scanY >= 0
+    const solidClipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
+    // Slices and point cloud retained above the scan plane: y >= scanY <=> (0, 1, 0) · p - scanY >= 0
+    const slicesClipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
-    const planeGeo = new THREE.PlaneGeometry(sliceWidth, sliceDepth);
-    planeGeo.rotateX(-Math.PI / 2);
+    // ─── 1. Sculpted Smooth-Shaded Anatomical Solid (Lower Half) ───────
+    // High-subdivision organic dual-lobe thoracic / visceral geometry
+    const solidGeo = new THREE.SphereGeometry(1.4, 96, 64);
+    const pos = solidGeo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const vx = pos.getX(i);
+      const vy = pos.getY(i);
+      const vz = pos.getZ(i);
+      const angle = Math.atan2(vz, vx);
+      // Dual-lobe thoracic / visceral morphology
+      const lobeX = 1.0 + 0.22 * Math.cos(2.0 * angle) - 0.12 * Math.sin(angle);
+      const taperY = 1.0 - 0.16 * vy * vy;
+      const cleft = 1.0 - 0.14 * Math.exp(-4.5 * (angle - Math.PI / 2) * (angle - Math.PI / 2));
+      const factor = lobeX * Math.max(0.42, taperY) * cleft;
+      pos.setX(i, vx * factor * 1.16);
+      pos.setY(i, vy * 1.18);
+      pos.setZ(i, vz * factor * 0.96);
+    }
+    solidGeo.computeVertexNormals();
 
-    const planeMat = new THREE.MeshBasicMaterial({
+    const solidMat = new THREE.MeshPhysicalMaterial({
+      color: 0x111827, // deep smoked obsidian / titanium
+      roughness: 0.22,
+      metalness: 0.15,
+      clearcoat: 0.85,
+      clearcoatRoughness: 0.15,
+      reflectivity: 0.8,
+      flatShading: false,
+      clippingPlanes: [solidClipPlane],
+      clipShadows: true,
+    });
+    const solidMesh = new THREE.Mesh(solidGeo, solidMat);
+    modelGroup.add(solidMesh);
+
+    // Segmented Vertebral Spine Column along posterior cleft
+    const spineGroup = new THREE.Group();
+    const vertGeo = new THREE.CylinderGeometry(0.17, 0.19, 0.13, 24);
+    const vertMat = new THREE.MeshPhysicalMaterial({
+      color: 0x334155,
+      roughness: 0.28,
+      metalness: 0.12,
+      clearcoat: 0.6,
+      clippingPlanes: [solidClipPlane],
+    });
+    for (let v = 0; v < 9; v++) {
+      const vy = -1.0 + v * 0.25;
+      const vertMesh = new THREE.Mesh(vertGeo, vertMat);
+      vertMesh.position.set(0, vy, -0.62);
+      spineGroup.add(vertMesh);
+    }
+    modelGroup.add(spineGroup);
+
+    // Branching Vascular Core (Sky-blue aortic branch)
+    const vesselCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, -1.0, -0.2),
+      new THREE.Vector3(0.08, -0.3, -0.15),
+      new THREE.Vector3(0.12, 0.4, -0.1),
+      new THREE.Vector3(0.0, 0.85, -0.05),
+      new THREE.Vector3(-0.25, 0.95, 0.1),
+    ]);
+    const vesselGeo = new THREE.TubeGeometry(vesselCurve, 32, 0.05, 12, false);
+    const vesselMat = new THREE.MeshStandardMaterial({
+      color: 0x0284c7,
+      emissive: 0x0369a1,
+      emissiveIntensity: 0.5,
+      clippingPlanes: [solidClipPlane],
+    });
+    const vesselMesh = new THREE.Mesh(vesselGeo, vesselMat);
+    modelGroup.add(vesselMesh);
+
+    // Taubin Curvature Wireframe Lattice Overlay
+    const wireMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.08,
+      clippingPlanes: [solidClipPlane],
+    });
+    const wireMesh = new THREE.Mesh(solidGeo, wireMat);
+    wireMesh.scale.setScalar(1.002);
+    modelGroup.add(wireMesh);
+
+    // ─── 2. 2D DICOM Axial Slice Stack (Upper Half) ────────────────────
+    const sliceCount = 10;
+    const sliceSpacing = 0.24;
+    const sliceWidth = 2.9;
+    const sliceDepth = 2.2;
+
+    const slicePlaneGeo = new THREE.PlaneGeometry(sliceWidth, sliceDepth);
+    slicePlaneGeo.rotateX(-Math.PI / 2);
+
+    const slicePlaneMat = new THREE.MeshBasicMaterial({
       color: 0x071e3d,
       transparent: true,
-      opacity: 0.12,
+      opacity: 0.14,
       depthWrite: false,
       side: THREE.DoubleSide,
+      clippingPlanes: [slicesClipPlane],
     });
 
-    const edgeGeo = new THREE.EdgesGeometry(planeGeo);
-    const edgeMat = new THREE.LineBasicMaterial({
+    const sliceEdgeGeo = new THREE.EdgesGeometry(slicePlaneGeo);
+    const sliceEdgeMat = new THREE.LineBasicMaterial({
       color: 0x38bdf8,
       transparent: true,
-      opacity: 0.22,
+      opacity: 0.25,
+      clippingPlanes: [slicesClipPlane],
     });
 
     const sliceGroup = new THREE.Group();
@@ -158,23 +261,27 @@ const HeroShowcase3D: React.FC = () => {
 
     for (let i = 0; i < sliceCount; i++) {
       const y = startY + i * sliceSpacing;
-      const slicePlane = new THREE.Mesh(planeGeo, planeMat);
+      const slicePlane = new THREE.Mesh(slicePlaneGeo, slicePlaneMat);
       slicePlane.position.y = y;
       sliceGroup.add(slicePlane);
 
-      const sliceEdges = new THREE.LineSegments(edgeGeo, edgeMat);
+      const sliceEdges = new THREE.LineSegments(sliceEdgeGeo, sliceEdgeMat);
       sliceEdges.position.y = y;
       sliceGroup.add(sliceEdges);
 
+      // Anatomical slice contour loops matching sculpted dual-lobe cross section
       const contourPoints: THREE.Vector3[] = [];
-      const segments = 40;
-      const normY = (i / (sliceCount - 1)) * 2 - 1;
-      const scaleFactor = Math.max(0.4, Math.sqrt(1 - normY * normY * 0.7));
+      const segments = 48;
+      const normY = y / 1.35;
+      const taper = Math.max(0.35, Math.sqrt(Math.max(0.01, 1 - normY * normY * 0.8)));
 
       for (let s = 0; s <= segments; s++) {
         const theta = (s / segments) * Math.PI * 2;
-        const rx = 1.0 * scaleFactor * (1 - 0.1 * Math.sin(theta));
-        const rz = 0.72 * scaleFactor * (1 + 0.08 * Math.cos(2 * theta));
+        const lobe = 1.0 + 0.22 * Math.cos(2.0 * theta) - 0.12 * Math.sin(theta);
+        const cleft = 1.0 - 0.14 * Math.exp(-4.5 * (theta - Math.PI / 2) * (theta - Math.PI / 2));
+        const factor = lobe * taper * cleft;
+        const rx = 1.4 * factor * 1.16;
+        const rz = 1.4 * factor * 0.96;
         contourPoints.push(new THREE.Vector3(Math.cos(theta) * rx, y + 0.002, Math.sin(theta) * rz));
       }
 
@@ -182,97 +289,67 @@ const HeroShowcase3D: React.FC = () => {
       const contourMat = new THREE.LineBasicMaterial({
         color: 0x38bdf8,
         transparent: true,
-        opacity: 0.18,
+        opacity: 0.45,
+        clippingPlanes: [slicesClipPlane],
       });
       const contourLine = new THREE.LineLoop(contourGeo, contourMat);
       sliceGroup.add(contourLine);
 
+      // Corner fiducials
       const hw = sliceWidth / 2;
       const hd = sliceDepth / 2;
-      const tickLen = 0.08;
-      const cornerPoints: THREE.Vector3[] = [
-        new THREE.Vector3(hw, y, hd),
-        new THREE.Vector3(hw - tickLen, y, hd),
-        new THREE.Vector3(hw, y, hd),
-        new THREE.Vector3(hw, y, hd - tickLen),
-        new THREE.Vector3(-hw, y, hd),
-        new THREE.Vector3(-hw + tickLen, y, hd),
-        new THREE.Vector3(-hw, y, hd),
-        new THREE.Vector3(-hw, y, hd - tickLen),
-        new THREE.Vector3(hw, y, -hd),
-        new THREE.Vector3(hw - tickLen, y, -hd),
-        new THREE.Vector3(hw, y, -hd),
-        new THREE.Vector3(hw, y, -hd + tickLen),
-        new THREE.Vector3(-hw, y, -hd),
-        new THREE.Vector3(-hw + tickLen, y, -hd),
-        new THREE.Vector3(-hw, y, -hd),
-        new THREE.Vector3(-hw, y, -hd + tickLen),
+      const tLen = 0.09;
+      const cornerPts = [
+        new THREE.Vector3(hw, y, hd), new THREE.Vector3(hw - tLen, y, hd),
+        new THREE.Vector3(hw, y, hd), new THREE.Vector3(hw, y, hd - tLen),
+        new THREE.Vector3(-hw, y, hd), new THREE.Vector3(-hw + tLen, y, hd),
+        new THREE.Vector3(-hw, y, hd), new THREE.Vector3(-hw, y, hd - tLen),
+        new THREE.Vector3(hw, y, -hd), new THREE.Vector3(hw - tLen, y, -hd),
+        new THREE.Vector3(hw, y, -hd), new THREE.Vector3(hw, y, -hd + tLen),
+        new THREE.Vector3(-hw, y, -hd), new THREE.Vector3(-hw + tLen, y, -hd),
+        new THREE.Vector3(-hw, y, -hd), new THREE.Vector3(-hw, y, -hd + tLen),
       ];
-      const cornerGeo = new THREE.BufferGeometry().setFromPoints(cornerPoints);
+      const cornerGeo = new THREE.BufferGeometry().setFromPoints(cornerPts);
       const cornerMat = new THREE.LineBasicMaterial({
         color: 0x38bdf8,
         transparent: true,
         opacity: 0.35,
+        clippingPlanes: [slicesClipPlane],
       });
-      const corners = new THREE.LineSegments(cornerGeo, cornerMat);
-      sliceGroup.add(corners);
+      sliceGroup.add(new THREE.LineSegments(cornerGeo, cornerMat));
     }
 
-    // ─── Matte-and-Rim-Lit Anatomical Isosurface Mesh ───────────────────
-    const coreGeo = new THREE.IcosahedronGeometry(0.95, 5);
-    const pos = coreGeo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const vx = pos.getX(i);
-      const vy = pos.getY(i);
-      const vz = pos.getZ(i);
-      const theta = Math.atan2(vz, vx);
-      const r = 1.0 + 0.14 * Math.sin(vy * 2.4 + theta) - 0.12 * Math.cos(theta * 2.0) - 0.1 * (vy * vy);
-      pos.setX(i, vx * r * 1.12);
-      pos.setY(i, vy * 1.15);
-      pos.setZ(i, vz * r * 0.92);
+    // Holographic raw sensor point cloud (calibrated voxel envelope)
+    const pointCount = 360;
+    const pointPositions = new Float32Array(pointCount * 3);
+    for (let p = 0; p < pointCount; p++) {
+      const py = (Math.random() - 0.5) * 2.4;
+      const pTheta = Math.random() * Math.PI * 2;
+      const pr = 1.0 + Math.random() * 0.45;
+      pointPositions[p * 3] = Math.cos(pTheta) * pr * 1.15;
+      pointPositions[p * 3 + 1] = py;
+      pointPositions[p * 3 + 2] = Math.sin(pTheta) * pr * 0.95;
     }
-    coreGeo.computeVertexNormals();
-
-    const coreMat = new THREE.MeshStandardMaterial({
-      color: 0x0f172a,
-      roughness: 0.38,
-      metalness: 0.32,
-      emissive: 0x051a2e,
-      emissiveIntensity: 0.4,
-      polygonOffset: true,
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1,
-    });
-    const coreMesh = new THREE.Mesh(coreGeo, coreMat);
-    modelGroup.add(coreMesh);
-
-    const wireMat = new THREE.MeshBasicMaterial({
+    const pointGeo = new THREE.BufferGeometry();
+    pointGeo.setAttribute('position', new THREE.BufferAttribute(pointPositions, 3));
+    const pointMat = new THREE.PointsMaterial({
       color: 0x38bdf8,
-      wireframe: true,
+      size: 0.035,
       transparent: true,
-      opacity: 0.08,
+      opacity: 0.4,
+      clippingPlanes: [slicesClipPlane],
     });
-    const wireMesh = new THREE.Mesh(coreGeo, wireMat);
-    wireMesh.scale.setScalar(1.002);
-    modelGroup.add(wireMesh);
+    const pointsMesh = new THREE.Points(pointGeo, pointMat);
+    modelGroup.add(pointsMesh);
 
-    const axisGeo = new THREE.CylinderGeometry(0.04, 0.04, 2.4, 16);
-    const axisMat = new THREE.MeshBasicMaterial({
-      color: 0x0a84ff,
-      transparent: true,
-      opacity: 0.28,
-    });
-    const axisMesh = new THREE.Mesh(axisGeo, axisMat);
-    modelGroup.add(axisMesh);
-
-    // ─── Gentle Vertical Laser Scan Sweep Plane ────────────────────────
-    const scanPlaneGeo = new THREE.PlaneGeometry(sliceWidth + 0.15, sliceDepth + 0.15);
+    // ─── 3. Luminous Horizontal Laser Scan Sweep Plane ─────────────────
+    const scanPlaneGeo = new THREE.PlaneGeometry(sliceWidth + 0.2, sliceDepth + 0.2);
     scanPlaneGeo.rotateX(-Math.PI / 2);
 
     const scanPlaneMat = new THREE.MeshBasicMaterial({
       color: 0x38bdf8,
       transparent: true,
-      opacity: 0.25,
+      opacity: 0.22,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
@@ -282,17 +359,17 @@ const HeroShowcase3D: React.FC = () => {
     const scanEdgeMat = new THREE.LineBasicMaterial({
       color: 0x38bdf8,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.9,
     });
-    const scanEdgeLines = new THREE.LineSegments(scanEdgeGeo, scanEdgeMat);
-    scanPlaneMesh.add(scanEdgeLines);
+    scanPlaneMesh.add(new THREE.LineSegments(scanEdgeGeo, scanEdgeMat));
 
-    const scanLight = new THREE.PointLight(0x38bdf8, 1.5, 3.2);
+    // Cyan sweep point light
+    const scanLight = new THREE.PointLight(0x38bdf8, 2.2, 4.0);
     scanPlaneMesh.add(scanLight);
 
     modelGroup.add(scanPlaneMesh);
 
-    // ─── Camera Framing with 30% Breathing Room ─────────────────────────
+    // ─── Camera Framing with 30% Margin ────────────────────────────────
     const fitCameraToBounds = () => {
       const box = new THREE.Box3().setFromObject(modelGroup);
       const sphere = box.getBoundingSphere(new THREE.Sphere());
@@ -317,8 +394,23 @@ const HeroShowcase3D: React.FC = () => {
       animationFrameId = requestAnimationFrame(animate);
       time += 0.012;
 
-      const scanY = Math.sin(time * 1.25) * 1.15;
-      scanPlaneMesh.position.y = scanY;
+      const currentMode = modeRef.current;
+
+      if (currentMode === 'scan') {
+        const scanY = Math.sin(time * 1.05) * 1.35;
+        solidClipPlane.constant = scanY;
+        slicesClipPlane.constant = -scanY;
+        scanPlaneMesh.visible = true;
+        scanPlaneMesh.position.y = scanY;
+      } else if (currentMode === 'slices') {
+        solidClipPlane.constant = -999;
+        slicesClipPlane.constant = 999;
+        scanPlaneMesh.visible = false;
+      } else if (currentMode === 'solid') {
+        solidClipPlane.constant = 999;
+        slicesClipPlane.constant = -999;
+        scanPlaneMesh.visible = false;
+      }
 
       modelGroup.position.y = Math.sin(time * 0.8) * 0.04;
 
@@ -344,15 +436,19 @@ const HeroShowcase3D: React.FC = () => {
       cancelAnimationFrame(animationFrameId);
       controls.dispose();
       renderer.dispose();
-      planeGeo.dispose();
-      planeMat.dispose();
-      edgeGeo.dispose();
-      edgeMat.dispose();
-      coreGeo.dispose();
-      coreMat.dispose();
+      solidGeo.dispose();
+      solidMat.dispose();
+      vertGeo.dispose();
+      vertMat.dispose();
+      vesselGeo.dispose();
+      vesselMat.dispose();
       wireMat.dispose();
-      axisGeo.dispose();
-      axisMat.dispose();
+      slicePlaneGeo.dispose();
+      slicePlaneMat.dispose();
+      sliceEdgeGeo.dispose();
+      sliceEdgeMat.dispose();
+      pointGeo.dispose();
+      pointMat.dispose();
       scanPlaneGeo.dispose();
       scanPlaneMat.dispose();
       scanEdgeGeo.dispose();
@@ -364,13 +460,35 @@ const HeroShowcase3D: React.FC = () => {
   }, []);
 
   return (
-    <div className="relative w-full h-[420px] sm:h-[500px] lg:h-[560px] select-none flex items-center justify-center">
-      <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
-      <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black to-transparent pointer-events-none" />
-      <div className="absolute bottom-3 inset-x-0 text-center pointer-events-none px-4">
-        <span className="text-[11px] font-mono text-[#86868B]/70 tracking-tight">
-          Stacked Axial CT Invariants · Middle-Anchor Spatial Calibration · 2-Manifold Core · Drag to Rotate
-        </span>
+    <div className="relative w-full flex flex-col items-center">
+      {/* 3D Canvas Box with Studio Glow */}
+      <div className="relative w-full h-[380px] sm:h-[440px] lg:h-[480px] select-none flex items-center justify-center">
+        {/* Subtle ambient studio glow emerging organically from pure #000000 */}
+        <div className="absolute inset-0 -z-10 flex items-center justify-center pointer-events-none">
+          <div className="w-[480px] sm:w-[640px] h-[300px] sm:h-[380px] bg-gradient-to-tr from-[#0071E3]/20 via-[#38BDF8]/15 to-transparent rounded-full blur-3xl opacity-75" />
+        </div>
+
+        <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+        <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black to-transparent pointer-events-none" />
+      </div>
+
+      {/* Interactive Apple Glass Mode Pill */}
+      <div className="flex items-center justify-center mt-2 z-10">
+        <div className="inline-flex items-center p-0.5 rounded-full bg-white/[0.08] backdrop-blur-xl border border-white/10 shadow-lg">
+          {(['scan', 'slices', 'solid'] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setDisplayMode(m)}
+              className={`px-3.5 py-1 rounded-full text-xs transition-all duration-200 ${
+                displayMode === m
+                  ? 'bg-[#F5F5F7] text-black font-semibold shadow-sm'
+                  : 'text-[#86868B] hover:text-[#F5F5F7] font-medium'
+              }`}
+            >
+              {m === 'scan' ? 'Live Scan' : m === 'slices' ? 'DICOM Slices' : '2-Manifold Solid'}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -475,29 +593,29 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
 
   return (
     <div className="bg-black text-[#F5F5F7] font-sans selection:bg-[#0071E3]/30 selection:text-white">
-      {/* ─── 1. Cinematic Hero Section (#000000 canvas) ─────────────────── */}
+      {/* ─── 1. Cinematic Hero Section (#000000 canvas, above-the-fold) ── */}
       <section
         ref={heroReveal.ref}
-        className={`pt-14 sm:pt-20 lg:pt-24 pb-16 sm:pb-24 text-center transition-all duration-1000 ease-out ${
+        className={`pt-10 sm:pt-14 pb-12 sm:pb-16 text-center transition-all duration-1000 ease-out ${
           heroReveal.isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
         }`}
       >
-        <div className="max-w-4xl mx-auto px-6 space-y-6">
+        <div className="max-w-4xl mx-auto px-6 space-y-4">
           <span className="text-xs sm:text-sm font-semibold tracking-wider text-[#2997FF] uppercase">
             SliceM 3D
           </span>
 
-          <h1 className="text-5xl sm:text-7xl lg:text-8xl font-semibold tracking-[-0.035em] text-[#F5F5F7] leading-[1.04]">
+          <h1 className="text-4xl sm:text-6xl lg:text-7xl font-semibold tracking-[-0.035em] text-[#F5F5F7] leading-[1.05]">
             Anatomical precision.
             <br />
             Reconstructed.
           </h1>
 
-          <p className="text-lg sm:text-xl text-[#86868B] max-w-2xl mx-auto leading-relaxed font-normal">
+          <p className="text-base sm:text-lg text-[#86868B] max-w-2xl mx-auto leading-relaxed font-normal">
             Automated DICOM verification, middle-anchor deskew, and watertight 2-manifold surfaces with zero volume shrinkage.
           </p>
 
-          <div className="pt-2 flex items-center justify-center gap-4 flex-wrap">
+          <div className="pt-1 flex items-center justify-center gap-4 flex-wrap">
             <button
               onClick={onLaunchWorkspace}
               className="bg-[#0071E3] hover:bg-[#0077ED] text-white text-sm font-medium px-6 py-2.5 rounded-full transition-all duration-200 shadow-sm"
@@ -514,7 +632,7 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
           </div>
         </div>
 
-        <div className="w-full mt-4">
+        <div className="w-full mt-3">
           <HeroShowcase3D />
         </div>
       </section>
@@ -560,7 +678,6 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
         >
           {/* ─── Slide 1: Sub-voxel Geometry QA ────────────────────────── */}
           <div className="w-[88vw] sm:w-[82vw] max-w-[1040px] shrink-0 snap-center min-h-[500px] md:min-h-[560px] rounded-[28px] bg-[#141416] border border-white/[0.06] p-8 md:p-12 flex flex-col justify-between relative overflow-hidden group">
-            {/* Top-left clean headline & single-sentence lead */}
             <div className="max-w-[540px] space-y-2 z-10">
               <h3 className="text-2xl sm:text-3xl md:text-4xl font-semibold text-[#F5F5F7] tracking-tight">
                 Sub-voxel Geometry QA.
@@ -570,7 +687,6 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
               </p>
             </div>
 
-            {/* Unobstructed Centered Visual */}
             <div className="my-auto py-4 sm:py-6 flex items-center justify-center w-full">
               <svg className="w-full max-w-[620px] h-auto max-h-[260px]" viewBox="0 0 540 240" fill="none">
                 <defs>
@@ -636,7 +752,6 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
               </svg>
             </div>
 
-            {/* Bottom Minimal Spec Rule */}
             <div className="border-t border-white/10 pt-4 flex items-center justify-between text-xs font-mono text-[#86868B] z-10">
               <span>Tolerance: 0.00 mm</span>
               <span className="text-[#30D158] font-semibold flex items-center gap-1.5">
@@ -837,7 +952,6 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
         </h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-12 gap-y-12 sm:gap-y-16">
-          {/* Spec 1 */}
           <div className="border-t border-white/10 pt-6 sm:pt-8 space-y-2">
             <div className="text-5xl sm:text-6xl lg:text-7xl font-semibold tracking-tight text-[#F5F5F7] font-mono tabular-nums leading-none">
               59
@@ -847,7 +961,6 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
             </p>
           </div>
 
-          {/* Spec 2 */}
           <div className="border-t border-white/10 pt-6 sm:pt-8 space-y-2">
             <div className="text-5xl sm:text-6xl lg:text-7xl font-semibold tracking-tight text-[#F5F5F7] font-mono tabular-nums leading-none">
               0.00 mm
@@ -857,7 +970,6 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
             </p>
           </div>
 
-          {/* Spec 3 */}
           <div className="border-t border-white/10 pt-6 sm:pt-8 space-y-2">
             <div className="text-5xl sm:text-6xl lg:text-7xl font-semibold tracking-tight text-[#F5F5F7] font-mono tabular-nums leading-none">
               1.00 mm³
@@ -867,7 +979,6 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
             </p>
           </div>
 
-          {/* Spec 4 */}
           <div className="border-t border-white/10 pt-6 sm:pt-8 space-y-2">
             <div className="text-5xl sm:text-6xl lg:text-7xl font-semibold tracking-tight text-[#F5F5F7] font-mono tabular-nums leading-none">
               0%
@@ -877,7 +988,6 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
             </p>
           </div>
 
-          {/* Spec 5 */}
           <div className="border-t border-white/10 pt-6 sm:pt-8 space-y-2">
             <div className="text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight text-[#F5F5F7] font-mono tabular-nums leading-none whitespace-nowrap">
               2-Manifold
@@ -887,7 +997,6 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
             </p>
           </div>
 
-          {/* Spec 6 */}
           <div className="border-t border-white/10 pt-6 sm:pt-8 space-y-2">
             <div className="text-5xl sm:text-6xl lg:text-7xl font-semibold tracking-tight text-[#F5F5F7] font-mono tabular-nums leading-none">
               1-Page
@@ -1018,7 +1127,7 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
               )}
 
               {activeStage === 4 && (
-                <div className="text-center space-y-3 animate-in fade-in duration-300">
+                <div className="text-center space-y-4 animate-in fade-in duration-300">
                   <div className="flex items-center justify-center gap-4 text-xs font-mono">
                     <div className="px-3 py-1.5 rounded-xl bg-[#161617] border border-white/10 text-[#0071E3]">
                       report.pdf (A4)
@@ -1068,11 +1177,11 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
         </div>
 
         {/* 3 High-Contrast Study Tiles */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Preset 1 */}
           <div
             onClick={() => onLoadPreset('synthetic_sphere_clean')}
-            className="rounded-[24px] bg-[#161617] hover:bg-[#1D1D1F] border border-white/[0.06] hover:border-white/20 p-8 transition-all duration-200 cursor-pointer flex flex-col justify-between group space-y-6"
+            className="rounded-[24px] bg-[#161617] hover:bg-[#1D1D1F] border border-white/[0.06] hover:border-white/20 p-7 transition-all duration-200 cursor-pointer flex flex-col justify-between group space-y-6"
           >
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs font-mono">
@@ -1106,7 +1215,7 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
           {/* Preset 2 */}
           <div
             onClick={() => onLoadPreset('synthetic_sphere_tilt_12deg')}
-            className="rounded-[24px] bg-[#161617] hover:bg-[#1D1D1F] border border-white/[0.06] hover:border-white/20 p-8 transition-all duration-200 cursor-pointer flex flex-col justify-between group space-y-6"
+            className="rounded-[24px] bg-[#161617] hover:bg-[#1D1D1F] border border-white/[0.06] hover:border-white/20 p-7 transition-all duration-200 cursor-pointer flex flex-col justify-between group space-y-6"
           >
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs font-mono">
@@ -1140,7 +1249,7 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
           {/* Preset 3 */}
           <div
             onClick={() => onLoadPreset('synthetic_sphere_motion_5mm')}
-            className="rounded-[24px] bg-[#161617] hover:bg-[#1D1D1F] border border-white/[0.06] hover:border-white/20 p-8 transition-all duration-200 cursor-pointer flex flex-col justify-between group space-y-6"
+            className="rounded-[24px] bg-[#161617] hover:bg-[#1D1D1F] border border-white/[0.06] hover:border-white/20 p-7 transition-all duration-200 cursor-pointer flex flex-col justify-between group space-y-6"
           >
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs font-mono">
