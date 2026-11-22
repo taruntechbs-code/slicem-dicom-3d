@@ -42,6 +42,8 @@ export interface SegmentationReport {
   model_used: string | null;
   runtime_sec: number | null;
   peak_vram_mb: number | null;
+  device?: string | null;
+  device_used?: string | null;
   warnings: string[];
 }
 

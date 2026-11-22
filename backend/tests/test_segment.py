@@ -595,3 +595,178 @@ def test_totalsegmentator_subprocess_failure_handling(tmp_path: Path, monkeypatc
     assert "Simulated MPS / OOM out of memory crash" in (job_status["error"] or "")
 
 
+def test_totalsegmentator_mps_selection_and_cpu_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test Apple Silicon MPS device selection, automatic CPU fallback on failure, and PDF label."""
+    import re
+    import subprocess
+    import zlib
+    import torch
+    from app.core.reporting import generate_case_pdf
+    from app.models.schemas import CaseReport, GeometryReport, MotionReport, ScanReport, SegmentationReport
+
+    # Mock PyTorch device availability: CUDA unavailable, MPS available
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    if hasattr(torch.backends, "mps"):
+        monkeypatch.setattr(torch.backends.mps, "is_available", lambda: True)
+
+    # 1. Test successful MPS execution
+    case_dir_mps = tmp_path / "case_totalseg_mps"
+    case_dir_mps.mkdir(parents=True, exist_ok=True)
+
+    vol_img = sitk.GetImageFromArray(np.zeros((10, 20, 20), dtype=np.float32))
+    vol_img.SetSpacing((1.0, 1.0, 1.0))
+    sitk.WriteImage(vol_img, str(case_dir_mps / "volume_iso.nii.gz"))
+
+    report_mps = CaseReport(
+        case_id="TEST-MPS",
+        created_at="2026-11-22T00:00:00Z",
+        status="pass",
+        scan=ScanReport(
+            modality="CT",
+            slice_count=10,
+            rows=20,
+            cols=20,
+            pixel_spacing_mm=[1.0, 1.0],
+            declared_thickness_mm=1.0,
+        ),
+        geometry=GeometryReport(
+            status="PASS",
+            slices_reordered=False,
+            measured_spacing_mm=1.0,
+            spacing_mismatch_mm=0.0,
+            missing_slice_indices=[],
+            gantry_tilt_deg=0.0,
+            isotropic_spacing_mm=1.0,
+            warnings=[],
+        ),
+        motion=MotionReport(
+            status="PASS",
+            applied=False,
+            per_slice_initial_shift_mm=[],
+            per_slice_residual_shift_mm=[],
+            max_residual_shift_mm=0.0,
+            flagged=False,
+        ),
+        segmentation=SegmentationReport(
+            status="PENDING",
+            model_used=None,
+            runtime_sec=None,
+            peak_vram_mb=None,
+            warnings=[],
+        ),
+        structures=[],
+        stage_timings_sec={},
+    )
+    (case_dir_mps / "report.json").write_text(report_mps.model_dump_json(indent=2))
+
+    mps_commands = []
+
+    def mock_mps_success_run(cmd, capture_output=True, text=True, env=None):
+        mps_commands.append(list(cmd))
+        out_idx = cmd.index("-o") + 1
+        out_path = Path(cmd[out_idx])
+        lbl_arr = np.zeros((10, 20, 20), dtype=np.uint16)
+        lbl_arr[2:8, 4:16, 4:16] = 5  # liver
+        fake_lbl = sitk.GetImageFromArray(lbl_arr)
+        fake_lbl.SetSpacing((1.0, 1.0, 1.0))
+        sitk.WriteImage(fake_lbl, str(out_path))
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="Success", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", mock_mps_success_run)
+
+    res_mps = run_segmentation(case_dir_mps, engine="totalsegmentator_fast")
+    assert len(mps_commands) == 1
+    dev_idx = mps_commands[0].index("--device") + 1
+    assert mps_commands[0][dev_idx] == "mps"
+    assert res_mps.segmentation.device == "mps"
+    assert res_mps.segmentation.device_used == "mps"
+
+    pdf_bytes_mps = generate_case_pdf(case_dir_mps)
+    pdf_text_mps = ""
+    for match in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", pdf_bytes_mps, re.DOTALL):
+        try:
+            pdf_text_mps += " " + zlib.decompress(match.group(1)).decode("latin1", errors="ignore")
+        except Exception:
+            pass
+    unescaped_mps = pdf_text_mps.replace(r"\(", "(").replace(r"\)", ")")
+    assert "Apple Silicon GPU (Metal / MPS)" in unescaped_mps
+
+    # 2. Test automatic fallback to CPU when MPS fails
+    case_dir_fallback = tmp_path / "case_totalseg_fallback"
+    case_dir_fallback.mkdir(parents=True, exist_ok=True)
+    sitk.WriteImage(vol_img, str(case_dir_fallback / "volume_iso.nii.gz"))
+    report_fb = report_mps.model_copy(update={"case_id": "TEST-FALLBACK"})
+    (case_dir_fallback / "report.json").write_text(report_fb.model_dump_json(indent=2))
+
+    fallback_commands = []
+
+    def mock_mps_fail_cpu_success_run(cmd, capture_output=True, text=True, env=None):
+        fallback_commands.append(list(cmd))
+        dev_index = cmd.index("--device") + 1
+        device_arg = cmd[dev_index]
+        if device_arg == "mps":
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=1,
+                stdout="",
+                stderr="RuntimeError: Placeholder storage has not been allocated on MPS device\n",
+            )
+        # Device is cpu -> succeed
+        out_idx = cmd.index("-o") + 1
+        out_path = Path(cmd[out_idx])
+        lbl_arr = np.zeros((10, 20, 20), dtype=np.uint16)
+        lbl_arr[2:8, 4:16, 4:16] = 5  # liver
+        fake_lbl = sitk.GetImageFromArray(lbl_arr)
+        fake_lbl.SetSpacing((1.0, 1.0, 1.0))
+        sitk.WriteImage(fake_lbl, str(out_path))
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="CPU Success", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", mock_mps_fail_cpu_success_run)
+
+    res_fb = run_segmentation(case_dir_fallback, engine="totalsegmentator_fast")
+    assert len(fallback_commands) == 2
+    assert fallback_commands[0][fallback_commands[0].index("--device") + 1] == "mps"
+    assert fallback_commands[1][fallback_commands[1].index("--device") + 1] == "cpu"
+    assert res_fb.segmentation.device == "cpu"
+    assert res_fb.segmentation.device_used == "cpu"
+
+    pdf_bytes_fb = generate_case_pdf(case_dir_fallback)
+    pdf_text_fb = ""
+    for match in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", pdf_bytes_fb, re.DOTALL):
+        try:
+            pdf_text_fb += " " + zlib.decompress(match.group(1)).decode("latin1", errors="ignore")
+        except Exception:
+            pass
+    unescaped_fb = pdf_text_fb.replace(r"\(", "(").replace(r"\)", ")")
+    assert "CPU / Unified Memory" in unescaped_fb
+
+    # 3. Test CUDA GPU label in PDF report
+    case_dir_cuda = tmp_path / "case_totalseg_cuda"
+    case_dir_cuda.mkdir(parents=True, exist_ok=True)
+    sitk.WriteImage(vol_img, str(case_dir_cuda / "volume_iso.nii.gz"))
+    report_cuda = report_mps.model_copy(
+        update={
+            "case_id": "TEST-CUDA",
+            "segmentation": SegmentationReport(
+                status="PASS",
+                model_used="totalsegmentator_fast",
+                runtime_sec=3.2,
+                peak_vram_mb=4096.0,
+                device="gpu",
+                device_used="gpu",
+                warnings=[],
+            ),
+        }
+    )
+    (case_dir_cuda / "report.json").write_text(report_cuda.model_dump_json(indent=2))
+    pdf_bytes_cuda = generate_case_pdf(case_dir_cuda)
+    pdf_text_cuda = ""
+    for match in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", pdf_bytes_cuda, re.DOTALL):
+        try:
+            pdf_text_cuda += " " + zlib.decompress(match.group(1)).decode("latin1", errors="ignore")
+        except Exception:
+            pass
+    unescaped_cuda = pdf_text_cuda.replace(r"\(", "(").replace(r"\)", ")")
+    assert "CUDA GPU (4096 MB VRAM)" in unescaped_cuda
+
+

@@ -107,6 +107,14 @@ class SegmentationReport(BaseModel):
         ge=0.0,
         description="Peak GPU / unified memory allocated in megabytes",
     )
+    device: Optional[str] = Field(
+        default=None,
+        description="Compute execution device (mps, gpu, cpu)",
+    )
+    device_used: Optional[str] = Field(
+        default=None,
+        description="Alias for compute execution device (mps, gpu, cpu)",
+    )
     warnings: List[str] = Field(
         default_factory=list,
         description="Segmentation warnings or caveats",

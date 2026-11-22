@@ -217,9 +217,9 @@ def _segment_totalsegmentator(
     # 1. Determine CLI binary or module fallback
     cli_path = Path(sys.executable).parent / "TotalSegmentator"
     if cli_path.is_file() and os.access(cli_path, os.X_OK):
-        cmd = [str(cli_path)]
+        base_cmd = [str(cli_path)]
     else:
-        cmd = [sys.executable, "-m", "totalsegmentator.bin.TotalSegmentator"]
+        base_cmd = [sys.executable, "-m", "totalsegmentator.bin.TotalSegmentator"]
 
     # 2. Output multi-label nifti path
     case_dir = volume_path.parent
@@ -231,38 +231,45 @@ def _segment_totalsegmentator(
             pass
 
     # 3. Determine device
-    # Apple Silicon MPS 3D ops + nnUNetv2 workers crash in-process on macOS (SIGSEGV/SIGABRT).
-    # On Darwin (macOS), strictly use cpu. On Linux/Windows with CUDA, use gpu.
+    # If CUDA is available -> "gpu"
+    # Else if Apple Silicon MPS is available -> "mps"
+    # Else -> "cpu"
     cuda_available = False
+    mps_available = False
     try:
         import torch
-        cuda_available = torch.cuda.is_available()
+
+        cuda_available = bool(torch.cuda.is_available())
+        mps_available = bool(getattr(torch.backends, "mps", None) and torch.backends.mps.is_available())
     except Exception:
         pass
 
-    if cuda_available and platform.system() != "Darwin":
-        device = "gpu"
+    if cuda_available:
+        target_device = "gpu"
+    elif mps_available:
+        target_device = "mps"
     else:
-        device = "cpu"
+        target_device = "cpu"
 
     task = "total_mr" if modality == "MRI" else "total"
 
-    cmd.extend([
-        "-i", str(volume_path),
-        "-o", str(out_ml_path),
-        "--ml",
-        "-ta", task,
-        "--device", device,
-        "--nr_thr_resamp", "1",
-        "--nr_thr_saving", "1",
-    ])
-
-    if fast:
-        cmd.append("--fast")
-
-    if roi_subset and len(roi_subset) > 0:
-        cmd.append("-rs")
-        cmd.extend(roi_subset)
+    def build_cmd(dev: str) -> List[str]:
+        c = list(base_cmd)
+        c.extend([
+            "-i", str(volume_path),
+            "-o", str(out_ml_path),
+            "--ml",
+            "-ta", task,
+            "--device", dev,
+            "--nr_thr_resamp", "1",
+            "--nr_thr_saving", "1",
+        ])
+        if fast:
+            c.append("--fast")
+        if roi_subset and len(roi_subset) > 0:
+            c.append("-rs")
+            c.extend(roi_subset)
+        return c
 
     # 4. macOS-safe environment dict inheriting os.environ
     env = os.environ.copy()
@@ -273,8 +280,11 @@ def _segment_totalsegmentator(
     env["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
     env["TOTALSEG_DISABLE_STATS"] = "1"
 
+    actual_device = target_device
+    cmd = build_cmd(target_device)
+
     if job_callback:
-        job_callback(35, f"Running TotalSegmentator subprocess ({'fast' if fast else 'full'}, device={device})...")
+        job_callback(35, f"Running TotalSegmentator subprocess ({'fast' if fast else 'full'}, device={target_device})...")
 
     logger.info("Executing TotalSegmentator subprocess: %s", " ".join(cmd))
 
@@ -285,6 +295,31 @@ def _segment_totalsegmentator(
         text=True,
         env=env,
     )
+
+    # If target_device == "mps" and subprocess fails or crashes, retry once with "cpu"
+    if proc.returncode != 0 and target_device == "mps":
+        raw_err = proc.stderr or proc.stdout or ""
+        logger.warning(
+            "TotalSegmentator failed on MPS (exit code %d). Retrying with CPU fallback. Error:\n%s",
+            proc.returncode,
+            raw_err[-500:] if raw_err else "",
+        )
+        actual_device = "cpu"
+        cmd = build_cmd("cpu")
+        if job_callback:
+            job_callback(40, f"Retrying TotalSegmentator subprocess on CPU fallback ({'fast' if fast else 'full'}, device=cpu)...")
+        logger.info("Executing TotalSegmentator retry on CPU: %s", " ".join(cmd))
+        if out_ml_path.is_file():
+            try:
+                out_ml_path.unlink()
+            except Exception:
+                pass
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
 
     if proc.returncode != 0:
         raw_err = proc.stderr or proc.stdout or ""
@@ -334,7 +369,7 @@ def _segment_totalsegmentator(
     except Exception:
         pass
 
-    return label_img, label_names
+    return label_img, label_names, actual_device
 
 
 def _segment_nnunet_custom(
@@ -405,6 +440,8 @@ def run_segmentation(
     if job_callback:
         job_callback(30, f"Executing segmentation engine '{engine}'...")
 
+    actual_device = "cpu"
+
     if engine == "phantom_threshold":
         volume_img = sitk.ReadImage(str(vol_path))
         is_synthetic = (
@@ -421,7 +458,7 @@ def run_segmentation(
         raw_label_img, label_names = _segment_ct_bone_threshold(volume_img)
     elif engine in ("totalsegmentator_fast", "totalsegmentator_full"):
         fast_mode = engine == "totalsegmentator_fast"
-        raw_label_img, label_names = _segment_totalsegmentator(
+        raw_label_img, label_names, actual_device = _segment_totalsegmentator(
             volume_path=vol_path,
             modality=report.scan.modality,
             fast=fast_mode,
@@ -518,7 +555,11 @@ def run_segmentation(
     # Save labels_meta.json
     labels_meta_file = case_dir / "labels_meta.json"
     with open(labels_meta_file, "w") as f:
-        json.dump({"structures": labels_meta_entries}, f, indent=2)
+        json.dump({
+            "device": actual_device,
+            "device_used": actual_device,
+            "structures": labels_meta_entries,
+        }, f, indent=2)
 
     # Telemetry
     runtime_sec = round(time.time() - t0, 3)
@@ -543,6 +584,8 @@ def run_segmentation(
     report.segmentation.model_used = engine
     report.segmentation.runtime_sec = runtime_sec
     report.segmentation.peak_vram_mb = peak_vram_mb
+    report.segmentation.device = actual_device
+    report.segmentation.device_used = actual_device
     report.segmentation.warnings = topology_warnings
     report.structures = structures
     report.stage_timings_sec["segment"] = runtime_sec

@@ -488,8 +488,22 @@ def generate_case_pdf(case_dir: Path) -> bytes:
         mot_status_str = "Skipped"
 
     # Compute Device / Peak Memory
-    if report.segmentation.peak_vram_mb is not None and report.segmentation.peak_vram_mb > 0:
-        device_str = f"{report.segmentation.peak_vram_mb:.0f} MB VRAM"
+    seg_device = getattr(report.segmentation, "device", None) or getattr(report.segmentation, "device_used", None)
+    if not seg_device:
+        meta_file = case_dir / "labels_meta.json"
+        if meta_file.is_file():
+            try:
+                with open(meta_file, "r", encoding="utf-8") as f:
+                    mdata = json.load(f)
+                    seg_device = mdata.get("device") or mdata.get("device_used")
+            except Exception:
+                pass
+
+    if seg_device == "mps":
+        device_str = "Apple Silicon GPU (Metal / MPS)"
+    elif seg_device == "gpu" or (report.segmentation.peak_vram_mb is not None and report.segmentation.peak_vram_mb > 0):
+        vram = report.segmentation.peak_vram_mb
+        device_str = f"CUDA GPU ({vram:.0f} MB VRAM)" if (vram is not None and vram > 0) else "CUDA GPU"
     else:
         device_str = "CPU / Unified Memory"
 
