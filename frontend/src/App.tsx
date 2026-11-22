@@ -137,7 +137,7 @@ export const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-black text-[#F5F5F7] flex flex-col font-sans selection:bg-[#0A84FF]/30 selection:text-white">
       {/* ─── Sticky Frosted Top Bar (52px single row, Apple Pro aesthetic) ─── */}
-      <header className="sticky top-0 z-40 h-[52px] bg-[#1C1C1E]/80 backdrop-blur-xl border-b border-white/[0.08] px-6 whitespace-nowrap">
+      <header className="sticky top-0 z-40 h-[52px] bg-black/75 backdrop-blur-xl border-b border-white/10 px-6 whitespace-nowrap">
         <div className="max-w-7xl h-full mx-auto flex items-center justify-between gap-4">
           {/* Left: Clean SliceM wordmark + tiny 6px backend status dot */}
           <div
@@ -164,7 +164,7 @@ export const App: React.FC = () => {
           </div>
 
           {/* Center: Apple-style pill segmented control (Overview | Pipeline | Benchmarks) */}
-          <div className="flex items-center p-0.5 rounded-full bg-black/60 border border-white/[0.06] shrink-0">
+          <div className="flex items-center p-0.5 rounded-full bg-[#101012] border border-white/10 shrink-0">
             <button
               onClick={() => setAppMode('overview')}
               className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
@@ -197,8 +197,8 @@ export const App: React.FC = () => {
             </button>
           </div>
 
-          {/* Right: Minimal Case selector dropdown */}
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Right: Minimal Case selector dropdown + Apple Blue Action CTA */}
+          <div className="flex items-center gap-2.5 shrink-0">
             {cases.length > 0 && (
               <select
                 value={activeCase.case_id}
@@ -209,7 +209,7 @@ export const App: React.FC = () => {
                     setAppMode('pipeline');
                   }
                 }}
-                className="bg-[#1C1C1E] border border-white/[0.08] text-[#F5F5F7] text-xs font-mono rounded-full px-3 py-1 outline-none hover:bg-[#2C2C2E] transition-colors cursor-pointer"
+                className="bg-[#1C1C1E] border border-white/10 text-[#F5F5F7] text-xs font-mono rounded-full px-3 py-1 outline-none hover:bg-[#2C2C2E] transition-colors cursor-pointer"
               >
                 {cases.map((c) => (
                   <option key={c.case_id} value={c.case_id}>
@@ -218,12 +218,21 @@ export const App: React.FC = () => {
                 ))}
               </select>
             )}
+
+            {appMode !== 'pipeline' && (
+              <button
+                onClick={() => setAppMode('pipeline')}
+                className="bg-[#0071E3] hover:bg-[#0077ED] text-white text-xs font-medium px-3.5 py-1 rounded-full transition-all duration-200 shadow-sm"
+              >
+                Launch Workspace
+              </button>
+            )}
           </div>
         </div>
       </header>
 
       {/* ─── Main Content ───────────────────────────────────────── */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 lg:p-8 space-y-6">
+      <main className="flex-1 w-full">
         {appMode === 'overview' ? (
           <LandingFrontage
             onLaunchWorkspace={() => setAppMode('pipeline')}
@@ -233,21 +242,23 @@ export const App: React.FC = () => {
             isBackendConnected={isBackendConnected}
             backendVersion={backendHealth?.version}
           />
-        ) : appMode === 'benchmarks' ? (
-          <div className="bg-[#141416] border border-white/[0.08] rounded-2xl p-6 shadow-xl">
-            <ValidationDashboard />
-          </div>
         ) : (
-          <>
-            {/* 5-Step Bar */}
-            <section aria-labelledby="stepper-title">
-              <h2 id="stepper-title" className="sr-only">
-                Pipeline Progress
-              </h2>
-              <Stepper currentStep={currentStep} onSelectStep={(id) => setCurrentStep(id)} />
-            </section>
+          <div className="max-w-7xl w-full mx-auto p-6 lg:p-8 space-y-6">
+            {appMode === 'benchmarks' ? (
+              <div className="bg-[#141416] border border-white/[0.08] rounded-2xl p-6 shadow-xl">
+                <ValidationDashboard />
+              </div>
+            ) : (
+              <>
+                {/* 5-Step Bar */}
+                <section aria-labelledby="stepper-title">
+                  <h2 id="stepper-title" className="sr-only">
+                    Pipeline Progress
+                  </h2>
+                  <Stepper currentStep={currentStep} onSelectStep={(id) => setCurrentStep(id)} />
+                </section>
 
-            {/* Live Pipeline Execution Progress Strip */}
+                {/* Live Pipeline Execution Progress Strip */}
             <div className="p-3 rounded-2xl bg-[#141416] border border-white/[0.08] flex items-center justify-between gap-4 text-xs">
               <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-0.5">
                 {[
@@ -344,9 +355,11 @@ export const App: React.FC = () => {
             </div>
           </>
         )}
-      </main>
-    </div>
-  );
+      </div>
+    )}
+  </main>
+</div>
+);
 };
 
 /* ─── Step 1: Load View ─────────────────────────────────────────────── */
