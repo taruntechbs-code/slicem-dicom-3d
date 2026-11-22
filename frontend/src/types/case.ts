@@ -50,6 +50,7 @@ export interface SegmentationReport {
 export interface StructureReport {
   id: number;
   name: string;
+  color?: string | null;
   volume_mm3: number;
   surface_area_mm2: number;
   mean_thickness_mm: number | null;

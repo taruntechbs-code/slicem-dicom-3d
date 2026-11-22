@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import SimpleITK as sitk
 
+from app.core.segment import get_canonical_structure_color
 from app.models.schemas import CaseReport, StructureReport
 
 
@@ -109,10 +110,12 @@ def compute_structure_analytics(
             "topology_components",
             prev_topology.get(struct_id, 1),
         )
+        st_color = meta_entry.get("color") or get_canonical_structure_color(struct_id)
 
         st_report = StructureReport(
             id=struct_id,
             name=name,
+            color=st_color,
             volume_mm3=mesh_data["volume_mm3"],
             surface_area_mm2=mesh_data["surface_area_mm2"],
             mean_thickness_mm=mean_thickness_mm,

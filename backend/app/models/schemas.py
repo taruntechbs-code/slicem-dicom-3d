@@ -128,6 +128,10 @@ class StructureReport(BaseModel):
 
     id: int = Field(..., description="Integer label identifier")
     name: str = Field(..., description="Clinical anatomical structure name")
+    color: Optional[str] = Field(
+        default=None,
+        description="Canonical hex color code for visualization and rendering (e.g. #38BDF8)",
+    )
     volume_mm3: float = Field(..., ge=0.0, description="Volumetric measure in cubic millimeters")
     surface_area_mm2: float = Field(..., ge=0.0, description="Mesh surface area in square millimeters")
     mean_thickness_mm: Optional[float] = Field(

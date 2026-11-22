@@ -235,12 +235,12 @@ def _render_orthogonal_composite(
         except Exception:
             pass
 
-    from app.core.segment import DEFAULT_STRUCTURE_COLORS
+    from app.core.segment import get_canonical_structure_color
 
     def get_color(uid: int) -> np.ndarray:
         if uid in color_map:
             return color_map[uid]
-        hex_c = DEFAULT_STRUCTURE_COLORS[(int(uid) - 1) % len(DEFAULT_STRUCTURE_COLORS)].lstrip("#")
+        hex_c = get_canonical_structure_color(uid).lstrip("#")
         return np.array((int(hex_c[0:2], 16), int(hex_c[2:4], 16), int(hex_c[4:6], 16)), dtype=np.float32)
 
     def make_panel(slice_2d: np.ndarray, mask_2d: Optional[np.ndarray]) -> Image.Image:

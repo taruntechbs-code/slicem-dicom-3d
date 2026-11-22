@@ -14,6 +14,7 @@ import {
 
 import { CaseReport } from '../types/case';
 import { api, MeshOptions } from '../lib/api';
+import { getStructureColor } from '../lib/colors';
 import { MeshViewport3D } from './MeshViewport3D';
 
 export function formatStructureName(name: string): string {
@@ -72,11 +73,6 @@ interface InspectStepProps {
   activeCase: CaseReport;
   onCaseUpdated: (c: CaseReport) => void;
 }
-
-const DEFAULT_STRUCTURE_COLORS = [
-  '#0A84FF', '#30D158', '#FF9F0A', '#BF5AF2', '#FF375F',
-  '#5E5CE6', '#64D2FF', '#FFD60A', '#32ADE6', '#FF453A',
-];
 
 export const InspectStep: React.FC<InspectStepProps> = ({
   activeCase,
@@ -510,8 +506,7 @@ export const InspectStep: React.FC<InspectStepProps> = ({
                 </div>
               ) : (
                 filteredStructures.map((st) => {
-                  const color =
-                    DEFAULT_STRUCTURE_COLORS[(st.id - 1) % DEFAULT_STRUCTURE_COLORS.length];
+                  const color = getStructureColor(st);
                   const isVisible = visibleStructures[st.id] ?? true;
                   const isSelected = selectedStructureId === st.id;
                   const currentOpacity = structureOpacities[st.id] ?? 0.9;
@@ -586,10 +581,7 @@ export const InspectStep: React.FC<InspectStepProps> = ({
                   <span
                     className="w-2.5 h-2.5 rounded-full shrink-0"
                     style={{
-                      backgroundColor:
-                        DEFAULT_STRUCTURE_COLORS[
-                          (selectedStructure.id - 1) % DEFAULT_STRUCTURE_COLORS.length
-                        ],
+                      backgroundColor: getStructureColor(selectedStructure),
                     }}
                   />
                   <span className="font-semibold text-sm text-[#F5F5F7] truncate">

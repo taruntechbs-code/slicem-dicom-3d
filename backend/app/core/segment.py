@@ -38,20 +38,35 @@ EngineType = Literal[
     "nnunet_custom",
 ]
 
-DEFAULT_STRUCTURE_COLORS: List[str] = [
-    "#38bdf8",  # sky
-    "#34d399",  # emerald
-    "#f43f5e",  # rose
-    "#fbbf24",  # amber
-    "#a855f7",  # purple
-    "#ec4899",  # pink
-    "#06b6d4",  # cyan
-    "#f97316",  # orange
-    "#84cc16",  # lime
-    "#6366f1",  # indigo
-    "#14b8a6",  # teal
-    "#e11d48",  # red
+CANONICAL_STRUCTURE_COLORS: List[str] = [
+    "#38BDF8",  # 1. Sky blue
+    "#34D399",  # 2. Emerald green
+    "#F43F5E",  # 3. Rose red
+    "#FBBF24",  # 4. Amber yellow
+    "#A855F7",  # 5. Purple / violet
+    "#EC4899",  # 6. Pink
+    "#06B6D4",  # 7. Cyan
+    "#F97316",  # 8. Orange
+    "#84CC16",  # 9. Lime green
+    "#6366F1",  # 10. Indigo
+    "#14B8A6",  # 11. Teal
+    "#E11D48",  # 12. Crimson
+    "#3B82F6",  # 13. Blue
+    "#10B981",  # 14. Mint green
+    "#EAB308",  # 15. Warm yellow
+    "#8B5CF6",  # 16. Violet
 ]
+
+DEFAULT_STRUCTURE_COLORS: List[str] = CANONICAL_STRUCTURE_COLORS
+
+
+def get_canonical_structure_color(label_id: int) -> str:
+    """Return deterministic canonical hex color for an anatomical structure keyed by label_id."""
+    lid = int(label_id)
+    if lid <= 0:
+        return CANONICAL_STRUCTURE_COLORS[0]
+    return CANONICAL_STRUCTURE_COLORS[(lid - 1) % len(CANONICAL_STRUCTURE_COLORS)]
+
 
 
 def cleanup_and_check_topology(
@@ -530,12 +545,13 @@ def run_segmentation(
             mean_intensity = 0.0
             std_intensity = 0.0
 
-        color = DEFAULT_STRUCTURE_COLORS[(label_id - 1) % len(DEFAULT_STRUCTURE_COLORS)]
+        color = get_canonical_structure_color(label_id)
         comp_count = max(1, topology_meta.get(label_id, {}).get("final_components", 1))
 
         struct_report = StructureReport(
             id=int(label_id),
             name=name,
+            color=color,
             volume_mm3=round(volume_mm3, 2),
             surface_area_mm2=0.0,
             mean_thickness_mm=None,

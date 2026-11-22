@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import SimpleITK as sitk
 import trimesh
+
+from app.core.segment import get_canonical_structure_color
 from vtkmodules.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 from vtkmodules.vtkCommonCore import VTK_UNSIGNED_CHAR
 from vtkmodules.vtkCommonDataModel import vtkImageData
@@ -148,7 +150,10 @@ def generate_structure_meshes(
     if not structures_meta:
         # Deduce from unique non-zero voxel values
         unique_ids = [int(x) for x in np.unique(labels_arr) if x > 0]
-        structures_meta = [{"id": uid, "name": f"structure_{uid}", "color": "#38bdf8"} for uid in unique_ids]
+        structures_meta = [
+            {"id": uid, "name": f"structure_{uid}", "color": get_canonical_structure_color(uid)}
+            for uid in unique_ids
+        ]
 
     meshes_dir = case_dir / "meshes"
     meshes_dir.mkdir(parents=True, exist_ok=True)
@@ -177,7 +182,7 @@ def generate_structure_meshes(
         struct_id = int(st["id"])
         name = st.get("name", f"structure_{struct_id}")
         slug = _slugify(name)
-        color_hex = st.get("color", "#38bdf8")
+        color_hex = st.get("color") or get_canonical_structure_color(struct_id)
 
         # 1. Create binary mask for this structure
         bin_arr = (labels_arr == struct_id).astype(np.uint8)

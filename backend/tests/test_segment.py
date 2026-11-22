@@ -286,6 +286,7 @@ def test_segmentation_with_clinical_nonzero_origin(tmp_path: Path):
     assert result_report.segmentation.status == "PASS"
     assert len(result_report.structures) == 1
     assert result_report.structures[0].name == "tissue_volume"
+    assert result_report.structures[0].color == "#38BDF8"
 
     # Verify saved labels.nii.gz preserved exact origin and spacing
     saved_labels = sitk.ReadImage(str(case_dir / "labels.nii.gz"))
@@ -304,6 +305,21 @@ def test_segmentation_with_clinical_nonzero_origin(tmp_path: Path):
     assert len(final_report.structures) == 1
     assert final_report.structures[0].watertight is True
     assert final_report.structures[0].mean_thickness_mm is not None
+    assert final_report.structures[0].color == "#38BDF8"
+
+
+def test_canonical_structure_colors_deterministic():
+    """Verify that canonical structure colors are deterministic and keyed by label_id."""
+    from app.core.segment import CANONICAL_STRUCTURE_COLORS, get_canonical_structure_color
+
+    assert len(CANONICAL_STRUCTURE_COLORS) == 16
+    assert len(set(CANONICAL_STRUCTURE_COLORS)) == 16
+
+    assert get_canonical_structure_color(1) == CANONICAL_STRUCTURE_COLORS[0]
+    assert get_canonical_structure_color(2) == CANONICAL_STRUCTURE_COLORS[1]
+    assert get_canonical_structure_color(17) == CANONICAL_STRUCTURE_COLORS[0]  # wraps modulo 16
+    assert get_canonical_structure_color(0) == CANONICAL_STRUCTURE_COLORS[0]  # safe fallback
+
 
 
 def test_ct_bone_threshold_and_boundary_capping(tmp_path: Path):

@@ -15,11 +15,7 @@ import { StatusBadge } from './components/StatusBadge';
 import { InspectStep, formatStructureName } from './components/InspectStep';
 import { ValidationDashboard } from './components/ValidationDashboard';
 import { LandingFrontage } from './components/LandingFrontage';
-
-const DEFAULT_STRUCTURE_COLORS_FE = [
-  '#0A84FF', '#30D158', '#FF9F0A', '#BF5AF2', '#FF375F',
-  '#5E5CE6', '#64D2FF', '#FFD60A', '#32ADE6', '#FF453A',
-];
+import { getStructureColor } from './lib/colors';
 
 // Fallback demo report for initial render before backend connects
 const FALLBACK_DEMO_CASE: CaseReport = {
@@ -1665,8 +1661,7 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
                 </div>
               ) : (
                 structures.map((st) => {
-                  const color =
-                    DEFAULT_STRUCTURE_COLORS_FE[(st.id - 1) % DEFAULT_STRUCTURE_COLORS_FE.length];
+                  const color = getStructureColor(st);
                   const isVisible = visibleIds.includes(st.id);
 
                   return (

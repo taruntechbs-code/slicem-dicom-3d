@@ -5,6 +5,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RotateCcw, Loader2 } from 'lucide-react';
 import { StructureReport } from '../types/case';
 import { api } from '../lib/api';
+import { getStructureColor } from '../lib/colors';
 
 /**
  * Volume-preserving Laplacian Taubin smoothing filter (iterations=2, lambda=0.5, mu=-0.53).
@@ -319,6 +320,8 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
         (gltf) => {
           const rootObj = gltf.scene;
           rootObj.userData = { structureId: st.id, name: st.name };
+          const hexColor = getStructureColor(st);
+          const threeColor = new THREE.Color(hexColor);
 
           rootObj.traverse((child) => {
             if ((child as THREE.Mesh).isMesh) {
@@ -329,6 +332,8 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
               }
               if (mesh.material) {
                 const mat = (mesh.material as THREE.Material).clone() as THREE.MeshStandardMaterial;
+                mat.color = threeColor;
+                mat.vertexColors = false;
                 mat.transparent = true;
                 mat.roughness = 0.35;
                 mat.metalness = 0.15;
@@ -378,6 +383,8 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
       const isVisible = visibleStructures[stId] ?? true;
       const opacity = structureOpacities[stId] ?? 0.9;
       const isSelected = selectedStructureId === stId;
+      const stObj = structures.find((s) => s.id === stId);
+      const hexColor = stObj ? getStructureColor(stObj) : getStructureColor(stId);
 
       obj.visible = isVisible;
 
@@ -390,9 +397,14 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
             mat.opacity = isVisible ? opacity : 0.0;
             mat.transparent = opacity < 0.99;
 
+            // Maintain canonical color
+            mat.color = new THREE.Color(hexColor);
+            mat.vertexColors = false;
+
+            // Highlight selected organ in its own color without hue distortion
             if (isSelected) {
-              mat.emissive = new THREE.Color(0x0a84ff);
-              mat.emissiveIntensity = 0.4;
+              mat.emissive = new THREE.Color(hexColor);
+              mat.emissiveIntensity = 0.25;
             } else {
               mat.emissive = new THREE.Color(0x000000);
               mat.emissiveIntensity = 0.0;
@@ -401,7 +413,7 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
         }
       });
     });
-  }, [visibleStructures, structureOpacities, wireframe, selectedStructureId]);
+  }, [visibleStructures, structureOpacities, wireframe, selectedStructureId, structures]);
 
   return (
     <div className="relative w-full h-full min-h-[420px] rounded-2xl overflow-hidden bg-black border border-white/[0.08] flex items-center justify-center">

@@ -24,7 +24,11 @@ from app.core.geometry import analyze_dicom_series, correct_volume_geometry
 from app.core.mesh import generate_structure_meshes
 from app.core.motion import correct_slice_motion, inject_slice_motion
 from app.core.phantoms import generate_sphere_phantom
-from app.core.segment import DEFAULT_STRUCTURE_COLORS, run_segmentation
+from app.core.segment import (
+    DEFAULT_STRUCTURE_COLORS,
+    get_canonical_structure_color,
+    run_segmentation,
+)
 from app.models.schemas import CaseReport, HealthResponse
 
 logger = logging.getLogger("slicem.api")
@@ -707,7 +711,7 @@ def get_overlay_slice(
 
             color_rgb = color_map.get(
                 int(uid),
-                _hex_to_rgb(DEFAULT_STRUCTURE_COLORS[(int(uid) - 1) % len(DEFAULT_STRUCTURE_COLORS)]),
+                _hex_to_rgb(get_canonical_structure_color(int(uid))),
             )
             color_np = np.array(color_rgb, dtype=np.float32)
 
