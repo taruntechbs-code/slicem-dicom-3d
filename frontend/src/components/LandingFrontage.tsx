@@ -6,6 +6,8 @@ import {
   ChevronLeft,
   Loader2,
   ExternalLink,
+  CheckCircle2,
+  FileCheck,
 } from 'lucide-react';
 
 interface LandingFrontageProps {
@@ -18,7 +20,8 @@ interface LandingFrontageProps {
 }
 
 /**
- * Scroll reveal hook respecting prefers-reduced-motion.
+ * Scroll reveal hook respecting prefers-reduced-motion with automatic fallback
+ * so sections never remain hidden on fast scrolls, tall viewports, or print.
  */
 function useScrollReveal<T extends HTMLElement = HTMLDivElement>() {
   const ref = useRef<T | null>(null);
@@ -28,7 +31,21 @@ function useScrollReveal<T extends HTMLElement = HTMLDivElement>() {
     const el = ref.current;
     if (!el) return;
 
+    // Check reduced motion
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setIsVisible(true);
+      return;
+    }
+
+    // Check if IntersectionObserver is available
+    if (typeof window !== 'undefined' && !('IntersectionObserver' in window)) {
+      setIsVisible(true);
+      return;
+    }
+
+    // Immediate check if element is already within viewport
+    const rect = el.getBoundingClientRect();
+    if (rect.top < window.innerHeight && rect.bottom > 0) {
       setIsVisible(true);
       return;
     }
@@ -40,19 +57,29 @@ function useScrollReveal<T extends HTMLElement = HTMLDivElement>() {
           observer.unobserve(el);
         }
       },
-      { threshold: 0.12 }
+      { threshold: 0.05, rootMargin: '0px 0px -20px 0px' }
     );
 
     observer.observe(el);
-    return () => observer.disconnect();
+
+    // Fallback: Never stay permanently hidden on fast scrolls or edge cases
+    const timer = setTimeout(() => {
+      setIsVisible(true);
+    }, 1800);
+
+    return () => {
+      observer.disconnect();
+      clearTimeout(timer);
+    };
   }, []);
 
   return { ref, isVisible };
 }
 
 /**
- * Frameless Three.js 3D Volumetric Anatomical Showcase for the Hero.
- * Emerging directly out of pure #000000 with subtle rim lighting and smooth OrbitControls.
+ * Frameless Three.js 3D DICOM Volumetric Showcase for the Hero.
+ * Stacked translucent axial CT slice planes intersecting a refined matte-and-rim-lit
+ * anatomical isosurface mesh with an animated vertical laser scan plane.
  */
 const HeroShowcase3D: React.FC = () => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -61,23 +88,22 @@ const HeroShowcase3D: React.FC = () => {
     const container = mountRef.current;
     if (!container) return;
 
-    const width = container.clientWidth || 800;
-    const height = container.clientHeight || 520;
+    let width = container.clientWidth || 800;
+    let height = container.clientHeight || 520;
 
     // Scene
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
 
     // Camera
-    const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 1000);
-    camera.position.set(0, 1.2, 5.2);
+    const camera = new THREE.PerspectiveCamera(34, width / height, 0.1, 1000);
 
     // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.15;
+    renderer.toneMappingExposure = 1.2;
     container.appendChild(renderer.domElement);
 
     // Controls: restricted polar angle, no zoom to ensure smooth page scrolling
@@ -87,72 +113,241 @@ const HeroShowcase3D: React.FC = () => {
     controls.enableZoom = false;
     controls.enablePan = false;
     controls.autoRotate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    controls.autoRotateSpeed = 1.0;
-    controls.maxPolarAngle = Math.PI / 1.7;
-    controls.minPolarAngle = Math.PI / 2.8;
+    controls.autoRotateSpeed = 0.7;
+    controls.maxPolarAngle = Math.PI / 1.75;
+    controls.minPolarAngle = Math.PI / 2.75;
 
-    // Lighting: Apple hardware studio lighting with cool rim glow
+    // Studio Lighting: Apple titanium / clinical ice-blue rim highlights
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.35);
     scene.add(ambientLight);
 
-    const keyLight = new THREE.DirectionalLight(0xffffff, 1.1);
-    keyLight.position.set(8, 12, 10);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.15);
+    keyLight.position.set(6, 10, 8);
     scene.add(keyLight);
 
-    const rimLight = new THREE.DirectionalLight(0x2997ff, 2.0);
-    rimLight.position.set(-10, 6, -8);
+    // Crisp ice-blue rim highlight
+    const rimLight = new THREE.DirectionalLight(0x38bdf8, 2.8);
+    rimLight.position.set(-8, 5, -7);
     scene.add(rimLight);
 
-    const fillLight = new THREE.DirectionalLight(0x0a84ff, 0.5);
-    fillLight.position.set(0, -6, 6);
+    const fillLight = new THREE.DirectionalLight(0x0ea5e9, 0.45);
+    fillLight.position.set(2, -6, 4);
     scene.add(fillLight);
 
-    // Group for dual-surface anatomical geometry
+    // Group for complete DICOM Volumetric assembly
     const modelGroup = new THREE.Group();
     scene.add(modelGroup);
 
-    // Primary Curvature-Preserving Anatomical Solid
-    const solidGeometry = new THREE.TorusKnotGeometry(1.35, 0.42, 160, 32, 2, 3);
-    const solidMaterial = new THREE.MeshStandardMaterial({
-      color: 0x0a84ff,
-      roughness: 0.28,
-      metalness: 0.22,
-      emissive: 0x031838,
-      emissiveIntensity: 0.4,
-    });
-    const solidMesh = new THREE.Mesh(solidGeometry, solidMaterial);
-    modelGroup.add(solidMesh);
+    // ─── 1. Stacked Translucent Axial CT Slice Planes ───────────────────
+    const sliceCount = 8;
+    const sliceSpacing = 0.32;
+    const sliceWidth = 2.6;
+    const sliceDepth = 1.9;
 
-    // Outer Translucent Isosurface Hull
-    const outerGeometry = new THREE.TorusKnotGeometry(1.35, 0.45, 64, 16, 2, 3);
-    const outerMaterial = new THREE.MeshBasicMaterial({
-      color: 0x64d2ff,
+    const planeGeo = new THREE.PlaneGeometry(sliceWidth, sliceDepth);
+    planeGeo.rotateX(-Math.PI / 2);
+
+    const planeMat = new THREE.MeshBasicMaterial({
+      color: 0x071e3d,
+      transparent: true,
+      opacity: 0.12,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    const edgeGeo = new THREE.EdgesGeometry(planeGeo);
+    const edgeMat = new THREE.LineBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.22,
+    });
+
+    const sliceGroup = new THREE.Group();
+    modelGroup.add(sliceGroup);
+
+    const startY = -((sliceCount - 1) * sliceSpacing) / 2;
+
+    for (let i = 0; i < sliceCount; i++) {
+      const y = startY + i * sliceSpacing;
+      const slicePlane = new THREE.Mesh(planeGeo, planeMat);
+      slicePlane.position.y = y;
+      sliceGroup.add(slicePlane);
+
+      const sliceEdges = new THREE.LineSegments(edgeGeo, edgeMat);
+      sliceEdges.position.y = y;
+      sliceGroup.add(sliceEdges);
+
+      // Faint anatomical cross-section contour on each slice plane
+      const contourPoints: THREE.Vector3[] = [];
+      const segments = 40;
+      // Anatomical contour radius varies by slice level (torso cross-section)
+      const normY = (i / (sliceCount - 1)) * 2 - 1;
+      const scaleFactor = Math.max(0.4, Math.sqrt(1 - normY * normY * 0.7));
+
+      for (let s = 0; s <= segments; s++) {
+        const theta = (s / segments) * Math.PI * 2;
+        const rx = 1.0 * scaleFactor * (1 - 0.1 * Math.sin(theta));
+        const rz = 0.72 * scaleFactor * (1 + 0.08 * Math.cos(2 * theta));
+        contourPoints.push(new THREE.Vector3(Math.cos(theta) * rx, y + 0.002, Math.sin(theta) * rz));
+      }
+
+      const contourGeo = new THREE.BufferGeometry().setFromPoints(contourPoints);
+      const contourMat = new THREE.LineBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.18,
+      });
+      const contourLine = new THREE.LineLoop(contourGeo, contourMat);
+      sliceGroup.add(contourLine);
+
+      // 4 tiny corner fiducial marks on each slice plane
+      const hw = sliceWidth / 2;
+      const hd = sliceDepth / 2;
+      const tickLen = 0.08;
+      const cornerPoints: THREE.Vector3[] = [
+        // Corner 1
+        new THREE.Vector3(hw, y, hd),
+        new THREE.Vector3(hw - tickLen, y, hd),
+        new THREE.Vector3(hw, y, hd),
+        new THREE.Vector3(hw, y, hd - tickLen),
+        // Corner 2
+        new THREE.Vector3(-hw, y, hd),
+        new THREE.Vector3(-hw + tickLen, y, hd),
+        new THREE.Vector3(-hw, y, hd),
+        new THREE.Vector3(-hw, y, hd - tickLen),
+        // Corner 3
+        new THREE.Vector3(hw, y, -hd),
+        new THREE.Vector3(hw - tickLen, y, -hd),
+        new THREE.Vector3(hw, y, -hd),
+        new THREE.Vector3(hw, y, -hd + tickLen),
+        // Corner 4
+        new THREE.Vector3(-hw, y, -hd),
+        new THREE.Vector3(-hw + tickLen, y, -hd),
+        new THREE.Vector3(-hw, y, -hd),
+        new THREE.Vector3(-hw, y, -hd + tickLen),
+      ];
+      const cornerGeo = new THREE.BufferGeometry().setFromPoints(cornerPoints);
+      const cornerMat = new THREE.LineBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.35,
+      });
+      const corners = new THREE.LineSegments(cornerGeo, cornerMat);
+      sliceGroup.add(corners);
+    }
+
+    // ─── 2. Matte-and-Rim-Lit Anatomical Isosurface Mesh ────────────────
+    const coreGeo = new THREE.IcosahedronGeometry(0.95, 5);
+    const pos = coreGeo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const vx = pos.getX(i);
+      const vy = pos.getY(i);
+      const vz = pos.getZ(i);
+      const theta = Math.atan2(vz, vx);
+      // Anatomical organ contour (smooth visceral curvature resembling liver / cardiac anatomy)
+      const r = 1.0 + 0.14 * Math.sin(vy * 2.4 + theta) - 0.12 * Math.cos(theta * 2.0) - 0.1 * (vy * vy);
+      pos.setX(i, vx * r * 1.12);
+      pos.setY(i, vy * 1.15);
+      pos.setZ(i, vz * r * 0.92);
+    }
+    coreGeo.computeVertexNormals();
+
+    const coreMat = new THREE.MeshStandardMaterial({
+      color: 0x0f172a, // Titanium slate / obsidian
+      roughness: 0.38,
+      metalness: 0.32,
+      emissive: 0x051a2e,
+      emissiveIntensity: 0.4,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
+    });
+    const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+    modelGroup.add(coreMesh);
+
+    // Secondary Isosurface Lattice (Taubin Curvature Wireframe)
+    const wireMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
       wireframe: true,
       transparent: true,
-      opacity: 0.09,
+      opacity: 0.08,
     });
-    const outerMesh = new THREE.Mesh(outerGeometry, outerMaterial);
-    modelGroup.add(outerMesh);
+    const wireMesh = new THREE.Mesh(coreGeo, wireMat);
+    wireMesh.scale.setScalar(1.002);
+    modelGroup.add(wireMesh);
 
-    // Subtle radial floor gradient disc fading into pure black
-    const floorGeo = new THREE.CircleGeometry(3.6, 64);
-    floorGeo.rotateX(-Math.PI / 2);
-    const floorMat = new THREE.MeshBasicMaterial({
-      color: 0x030814,
+    // Central Anatomical Vascular/Density Core Axis
+    const axisGeo = new THREE.CylinderGeometry(0.04, 0.04, 2.4, 16);
+    const axisMat = new THREE.MeshBasicMaterial({
+      color: 0x0a84ff,
       transparent: true,
-      opacity: 0.4,
+      opacity: 0.28,
     });
-    const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.position.y = -1.9;
-    scene.add(floor);
+    const axisMesh = new THREE.Mesh(axisGeo, axisMat);
+    modelGroup.add(axisMesh);
 
+    // ─── 3. Gentle Vertical Laser Scan Sweep Plane ─────────────────────
+    const scanPlaneGeo = new THREE.PlaneGeometry(sliceWidth + 0.15, sliceDepth + 0.15);
+    scanPlaneGeo.rotateX(-Math.PI / 2);
+
+    const scanPlaneMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.25,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const scanPlaneMesh = new THREE.Mesh(scanPlaneGeo, scanPlaneMat);
+
+    const scanEdgeGeo = new THREE.EdgesGeometry(scanPlaneGeo);
+    const scanEdgeMat = new THREE.LineBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.85,
+    });
+    const scanEdgeLines = new THREE.LineSegments(scanEdgeGeo, scanEdgeMat);
+    scanPlaneMesh.add(scanEdgeLines);
+
+    // Moving laser point light
+    const scanLight = new THREE.PointLight(0x38bdf8, 1.5, 3.2);
+    scanPlaneMesh.add(scanLight);
+
+    modelGroup.add(scanPlaneMesh);
+
+    // ─── 4. Camera Framing with 25%+ Breathing Margin ──────────────────
+    const fitCameraToBounds = () => {
+      const box = new THREE.Box3().setFromObject(modelGroup);
+      const sphere = box.getBoundingSphere(new THREE.Sphere());
+      const fovRad = (camera.fov * Math.PI) / 360;
+      const currentAspect = camera.aspect;
+
+      // 30% breathing room to strictly prevent clipping top/bottom/sides
+      const vDist = (sphere.radius / Math.sin(fovRad)) * 1.32;
+      const hDist = (sphere.radius / (Math.sin(fovRad) * currentAspect)) * 1.32;
+      const distance = Math.max(vDist, hDist);
+
+      camera.position.set(0, 0.15, distance);
+      camera.lookAt(0, 0, 0);
+      controls.target.set(0, 0, 0);
+    };
+
+    fitCameraToBounds();
+
+    // Animation Loop
     let animationFrameId: number;
     let time = 0;
 
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
-      time += 0.01;
-      modelGroup.position.y = Math.sin(time) * 0.06;
+      time += 0.012;
+
+      // Gentle laser scan sweep along Y axis between top and bottom slice planes
+      const scanY = Math.sin(time * 1.25) * 1.15;
+      scanPlaneMesh.position.y = scanY;
+
+      // Very subtle floating motion
+      modelGroup.position.y = Math.sin(time * 0.8) * 0.04;
+
       controls.update();
       renderer.render(scene, camera);
     };
@@ -160,11 +355,12 @@ const HeroShowcase3D: React.FC = () => {
 
     const handleResize = () => {
       if (!container || !renderer || !camera) return;
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      camera.aspect = w / h;
+      width = container.clientWidth;
+      height = container.clientHeight;
+      camera.aspect = width / height;
       camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
+      renderer.setSize(width, height);
+      fitCameraToBounds();
     };
 
     window.addEventListener('resize', handleResize);
@@ -174,12 +370,19 @@ const HeroShowcase3D: React.FC = () => {
       cancelAnimationFrame(animationFrameId);
       controls.dispose();
       renderer.dispose();
-      solidGeometry.dispose();
-      solidMaterial.dispose();
-      outerGeometry.dispose();
-      outerMaterial.dispose();
-      floorGeo.dispose();
-      floorMat.dispose();
+      planeGeo.dispose();
+      planeMat.dispose();
+      edgeGeo.dispose();
+      edgeMat.dispose();
+      coreGeo.dispose();
+      coreMat.dispose();
+      wireMat.dispose();
+      axisGeo.dispose();
+      axisMat.dispose();
+      scanPlaneGeo.dispose();
+      scanPlaneMat.dispose();
+      scanEdgeGeo.dispose();
+      scanEdgeMat.dispose();
       if (renderer.domElement && container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
@@ -187,14 +390,14 @@ const HeroShowcase3D: React.FC = () => {
   }, []);
 
   return (
-    <div className="relative w-full h-[400px] sm:h-[500px] lg:h-[620px] select-none flex items-center justify-center">
+    <div className="relative w-full h-[420px] sm:h-[500px] lg:h-[560px] select-none flex items-center justify-center">
       <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
-      {/* Bottom gradient fade into pure #000000 */}
-      <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black to-transparent pointer-events-none" />
-      {/* Subtle frameless micro-caption */}
-      <div className="absolute bottom-4 inset-x-0 text-center pointer-events-none">
+      {/* Subtle bottom gradient fade into pure #000000 */}
+      <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black to-transparent pointer-events-none" />
+      {/* Frameless micro-caption */}
+      <div className="absolute bottom-3 inset-x-0 text-center pointer-events-none px-4">
         <span className="text-[11px] font-mono text-[#86868B]/70 tracking-tight">
-          Watertight 2-Manifold · Taubin Curvature Filter · Drag to Rotate
+          Stacked Axial CT Invariants · Middle-Anchor Spatial Calibration · 2-Manifold Core · Drag to Rotate
         </span>
       </div>
     </div>
@@ -221,20 +424,41 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
   const presetsReveal = useScrollReveal();
 
   const handleCarouselScroll = () => {
-    if (!carouselRef.current) return;
-    const { scrollLeft, clientWidth } = carouselRef.current;
-    const index = Math.round(scrollLeft / (clientWidth * 0.75));
-    setActiveHighlightIndex(Math.min(Math.max(index, 0), 3));
+    const container = carouselRef.current;
+    if (!container) return;
+
+    const slides = Array.from(container.children) as HTMLElement[];
+    if (slides.length === 0) return;
+
+    const containerCenter = container.scrollLeft + container.clientWidth / 2;
+    let closestIdx = 0;
+    let minDiff = Infinity;
+
+    slides.forEach((slide, idx) => {
+      const slideCenter = slide.offsetLeft + slide.offsetWidth / 2;
+      const diff = Math.abs(containerCenter - slideCenter);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIdx = idx;
+      }
+    });
+
+    setActiveHighlightIndex(closestIdx);
   };
 
   const scrollCarouselTo = (index: number) => {
-    if (!carouselRef.current) return;
-    const cardWidth = 520;
-    carouselRef.current.scrollTo({
-      left: index * cardWidth,
-      behavior: 'smooth',
-    });
-    setActiveHighlightIndex(index);
+    const container = carouselRef.current;
+    if (!container) return;
+
+    const slides = Array.from(container.children) as HTMLElement[];
+    if (slides[index]) {
+      slides[index].scrollIntoView({
+        behavior: 'smooth',
+        inline: 'center',
+        block: 'nearest',
+      });
+      setActiveHighlightIndex(index);
+    }
   };
 
   const stages = [
@@ -336,14 +560,14 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
         </div>
       </section>
 
-      {/* ─── 2. "Get the highlights." Horizontal Showcase Carousel ─────── */}
+      {/* ─── 2. "Get the highlights." Cinematic Showcase Carousel ──────── */}
       <section
         ref={highlightsReveal.ref}
-        className={`max-w-[1240px] mx-auto px-6 pt-16 sm:pt-28 transition-all duration-1000 ease-out ${
+        className={`w-full pt-16 sm:pt-28 transition-all duration-1000 ease-out ${
           highlightsReveal.isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
         }`}
       >
-        <div className="flex items-end justify-between mb-8 sm:mb-12">
+        <div className="max-w-[1240px] mx-auto px-6 flex items-end justify-between mb-8 sm:mb-12">
           <h2 className="text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight text-[#F5F5F7]">
             Get the highlights.
           </h2>
@@ -369,159 +593,415 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
           </div>
         </div>
 
-        {/* Carousel Container */}
+        {/* Wide Carousel Container with centered snap and adjacent slide peek */}
         <div
           ref={carouselRef}
           onScroll={handleCarouselScroll}
-          className="flex gap-5 overflow-x-auto no-scrollbar scroll-smooth snap-x snap-mandatory pb-4"
+          className="flex gap-6 lg:gap-8 overflow-x-auto no-scrollbar scroll-smooth snap-x snap-mandatory px-4 sm:px-8 lg:px-12 pb-6 pt-2"
+          style={{ scrollSnapType: 'x mandatory' }}
         >
-          {/* Card 1: Sub-voxel Geometry QA */}
-          <div className="w-[320px] sm:w-[420px] md:w-[480px] shrink-0 h-[480px] sm:h-[520px] rounded-[28px] bg-[#101012] p-8 sm:p-10 flex flex-col justify-between overflow-hidden relative snap-start border border-white/[0.04]">
-            <div className="space-y-2 z-10">
-              <span className="text-xs uppercase tracking-wider text-[#86868B] font-semibold block">
-                Calibration
-              </span>
-              <h3 className="text-2xl sm:text-3xl font-semibold text-[#F5F5F7] tracking-tight leading-snug">
-                Sub-voxel Geometry QA.
-              </h3>
-              <p className="text-sm text-[#86868B] leading-relaxed max-w-sm">
-                IPP normal sorting and middle-anchor gantry deskew.
-              </p>
+          {/* ─── Slide 1: Sub-voxel Geometry QA ────────────────────────── */}
+          <div className="w-[88vw] sm:w-[82vw] max-w-[1040px] shrink-0 snap-center min-h-[460px] md:min-h-[520px] rounded-[28px] bg-[#101012] border border-white/[0.06] p-8 sm:p-10 lg:p-12 flex flex-col lg:flex-row gap-8 justify-between relative overflow-hidden">
+            {/* Left Info Column */}
+            <div className="lg:w-[42%] shrink-0 flex flex-col justify-between space-y-6 z-10">
+              <div className="space-y-3">
+                <span className="text-xs uppercase tracking-wider text-[#86868B] font-semibold block">
+                  01 / Calibration
+                </span>
+                <h3 className="text-3xl sm:text-4xl lg:text-5xl font-semibold text-[#F5F5F7] tracking-tight leading-[1.08]">
+                  Sub-voxel Geometry QA.
+                </h3>
+                <p className="text-sm sm:text-base leading-relaxed pt-1">
+                  <span className="text-[#F5F5F7] font-medium">IPP normal sorting &amp; middle-anchor deskew. </span>
+                  <span className="text-[#86868B]">
+                    Strict mathematical projection along slice normal vectors detects missing slice gaps and eliminates gantry tilt without volume clipping.
+                  </span>
+                </p>
+              </div>
+
+              <div className="border-t border-white/10 pt-4 flex items-center justify-between text-xs font-mono text-[#86868B]">
+                <span>Tolerance: 0.00 mm</span>
+                <span className="text-[#30D158] font-semibold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  PASS (Continuous)
+                </span>
+              </div>
             </div>
 
-            {/* High-contrast Graphic */}
-            <div className="relative my-auto flex items-center justify-center py-6">
-              <svg className="w-64 h-36" viewBox="0 0 256 144" fill="none">
-                <line x1="30" y1="30" x2="190" y2="30" stroke="#86868B" strokeWidth="1" strokeDasharray="3 3" />
-                <line x1="30" y1="70" x2="190" y2="70" stroke="#2997FF" strokeWidth="1.5" />
-                <line x1="30" y1="110" x2="190" y2="110" stroke="#86868B" strokeWidth="1" strokeDasharray="3 3" />
-                <path d="M110 130 L110 14" stroke="#0071E3" strokeWidth="2" />
-                <circle cx="110" cy="70" r="4" fill="#30D158" />
-                <text x="122" y="74" fill="#F5F5F7" fontSize="10" fontFamily="monospace">ref_ipp</text>
-                <text x="122" y="24" fill="#2997FF" fontSize="10" fontFamily="monospace">normal (N)</text>
+            {/* Right Rich Visual */}
+            <div className="lg:w-[58%] flex-1 flex items-center justify-center relative min-h-[260px] sm:min-h-[320px] rounded-2xl bg-black/50 border border-white/[0.04] p-4 sm:p-6 overflow-hidden">
+              <svg className="w-full h-full max-h-[300px]" viewBox="0 0 540 280" fill="none">
+                {/* Background Grid Pattern */}
+                <defs>
+                  <pattern id="diag-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                    <line x1="0" y1="0" x2="20" y2="0" stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
+                    <line x1="0" y1="0" x2="0" y2="20" stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
+                  </pattern>
+                </defs>
+                <rect width="540" height="280" fill="url(#diag-grid)" rx="12" />
+
+                {/* Left Panel: Skewed & Scrambled */}
+                <g transform="translate(30, 25)">
+                  <text x="0" y="15" fill="#86868B" fontSize="11" fontFamily="sans-serif" fontWeight="600" letterSpacing="0.05em">
+                    RAW ACQUISITION (12° TILT)
+                  </text>
+                  {/* Tilted slices */}
+                  {[
+                    { y: 55, num: '#14' },
+                    { y: 88, num: '#10' },
+                    { y: 121, num: '#13' },
+                    { y: 154, num: '#11' },
+                    { y: 187, num: '#12' },
+                  ].map((sl, idx) => (
+                    <g key={idx}>
+                      <line
+                        x1="10"
+                        y1={sl.y - 12}
+                        x2="155"
+                        y2={sl.y + 12}
+                        stroke="#FF9F0A"
+                        strokeWidth="2"
+                        strokeDasharray="4 2"
+                      />
+                      <circle cx="82" cy={sl.y} r="3" fill="#FF9F0A" />
+                      <text x="162" y={sl.y + 16} fill="#86868B" fontSize="9" fontFamily="monospace">
+                        {sl.num}
+                      </text>
+                    </g>
+                  ))}
+                  <rect x="10" y="215" width="165" height="22" rx="4" fill="rgba(255,159,10,0.12)" stroke="#FF9F0A" strokeWidth="1" />
+                  <text x="18" y="230" fill="#FF9F0A" fontSize="9" fontFamily="monospace">
+                    Δz Non-Equidistant: WARN
+                  </text>
+                </g>
+
+                {/* Middle Transform Indicator */}
+                <g transform="translate(225, 110)">
+                  <line x1="0" y1="30" x2="65" y2="30" stroke="#0071E3" strokeWidth="2" strokeDasharray="3 3" />
+                  <polygon points="65,26 75,30 65,34" fill="#0071E3" />
+                  <circle cx="35" cy="30" r="14" fill="#141416" stroke="#0071E3" strokeWidth="1.5" />
+                  <text x="35" y="34" fill="#2997FF" fontSize="11" fontFamily="sans-serif" textAnchor="middle" fontWeight="bold">
+                    N/2
+                  </text>
+                  <text x="35" y="60" fill="#86868B" fontSize="8" fontFamily="monospace" textAnchor="middle">
+                    Anchor Deskew
+                  </text>
+                </g>
+
+                {/* Right Panel: Orthogonal Calibrated Stack */}
+                <g transform="translate(320, 25)">
+                  <text x="0" y="15" fill="#30D158" fontSize="11" fontFamily="sans-serif" fontWeight="600" letterSpacing="0.05em">
+                    CALIBRATED 1.00 MM³ STACK
+                  </text>
+                  {/* Calibrated horizontal parallel slices */}
+                  {[
+                    { y: 55, num: '#01' },
+                    { y: 88, num: '#02' },
+                    { y: 121, num: '#03 (Anchor)' },
+                    { y: 154, num: '#04' },
+                    { y: 187, num: '#05' },
+                  ].map((sl, idx) => (
+                    <g key={idx}>
+                      <line
+                        x1="10"
+                        y1={sl.y}
+                        x2="160"
+                        y2={sl.y}
+                        stroke={idx === 2 ? '#30D158' : '#2997FF'}
+                        strokeWidth={idx === 2 ? '2.5' : '1.8'}
+                      />
+                      <circle cx="85" cy={sl.y} r="3" fill={idx === 2 ? '#30D158' : '#2997FF'} />
+                      <text x="166" y={sl.y + 4} fill={idx === 2 ? '#30D158' : '#F5F5F7'} fontSize="9" fontFamily="monospace">
+                        {sl.num}
+                      </text>
+                    </g>
+                  ))}
+                  {/* Spacing dimension bracket */}
+                  <line x1="5" y1="55" x2="5" y2="187" stroke="#38BDF8" strokeWidth="1" />
+                  <line x1="2" y1="55" x2="8" y2="55" stroke="#38BDF8" strokeWidth="1" />
+                  <line x1="2" y1="187" x2="8" y2="187" stroke="#38BDF8" strokeWidth="1" />
+                  <rect x="10" y="215" width="168" height="22" rx="4" fill="rgba(48,209,88,0.12)" stroke="#30D158" strokeWidth="1" />
+                  <text x="18" y="230" fill="#30D158" fontSize="9" fontFamily="monospace">
+                    ✓ 0.00 mm Mismatch: PASS
+                  </text>
+                </g>
               </svg>
             </div>
-
-            <div className="flex items-center justify-between text-xs font-mono text-[#86868B] border-t border-white/10 pt-4 z-10">
-              <span>Tolerance: 0.00 mm</span>
-              <span className="text-[#30D158]">PASS</span>
-            </div>
           </div>
 
-          {/* Card 2: 59 Anatomical Solids */}
-          <div className="w-[320px] sm:w-[420px] md:w-[480px] shrink-0 h-[480px] sm:h-[520px] rounded-[28px] bg-[#101012] p-8 sm:p-10 flex flex-col justify-between overflow-hidden relative snap-start border border-white/[0.04]">
-            <div className="space-y-2 z-10">
-              <span className="text-xs uppercase tracking-wider text-[#86868B] font-semibold block">
-                Inference
-              </span>
-              <h3 className="text-2xl sm:text-3xl font-semibold text-[#F5F5F7] tracking-tight leading-snug">
-                59 anatomical solids.
-              </h3>
-              <p className="text-sm text-[#86868B] leading-relaxed max-w-sm">
-                Isolated TotalSegmentator volumetric inference.
-              </p>
+          {/* ─── Slide 2: 59 Anatomical Solids ─────────────────────────── */}
+          <div className="w-[88vw] sm:w-[82vw] max-w-[1040px] shrink-0 snap-center min-h-[460px] md:min-h-[520px] rounded-[28px] bg-[#101012] border border-white/[0.06] p-8 sm:p-10 lg:p-12 flex flex-col lg:flex-row gap-8 justify-between relative overflow-hidden">
+            {/* Left Info Column */}
+            <div className="lg:w-[42%] shrink-0 flex flex-col justify-between space-y-6 z-10">
+              <div className="space-y-3">
+                <span className="text-xs uppercase tracking-wider text-[#86868B] font-semibold block">
+                  02 / Inference
+                </span>
+                <h3 className="text-3xl sm:text-4xl lg:text-5xl font-semibold text-[#F5F5F7] tracking-tight leading-[1.08]">
+                  59 anatomical solids.
+                </h3>
+                <p className="text-sm sm:text-base leading-relaxed pt-1">
+                  <span className="text-[#F5F5F7] font-medium">Isolated multi-organ inference. </span>
+                  <span className="text-[#86868B]">
+                    TotalSegmentator subprocess sandbox extracts complete visceral, skeletal, and vascular anatomy with connected-component topology cleanup.
+                  </span>
+                </p>
+              </div>
+
+              <div className="border-t border-white/10 pt-4 flex items-center justify-between text-xs font-mono text-[#86868B]">
+                <span>Isolated Sandbox</span>
+                <span className="text-[#2997FF] font-semibold">59 Multi-Label Solids</span>
+              </div>
             </div>
 
-            {/* High-contrast Graphic */}
-            <div className="my-auto grid grid-cols-2 gap-3 py-4">
-              {[
-                { name: 'Liver Solid', vol: '1,428 cm³', color: '#0A84FF' },
-                { name: 'Spleen Solid', vol: '184 cm³', color: '#30D158' },
-                { name: 'Kidney (Left)', vol: '162 cm³', color: '#FF9F0A' },
-                { name: 'Vertebrae T1-L5', vol: '348 cm³', color: '#BF5AF2' },
-              ].map((item) => (
-                <div key={item.name} className="p-3 rounded-2xl bg-[#161617] border border-white/[0.04] space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
-                    <span className="text-xs text-[#F5F5F7] font-medium">{item.name}</span>
+            {/* Right Rich Visual */}
+            <div className="lg:w-[58%] flex-1 flex flex-col sm:flex-row items-center justify-between gap-5 relative min-h-[260px] sm:min-h-[320px] rounded-2xl bg-black/50 border border-white/[0.04] p-5 sm:p-6 overflow-hidden">
+              {/* Axial Cross-Section Silhouette */}
+              <div className="relative w-48 h-48 sm:w-56 sm:h-56 shrink-0 flex items-center justify-center">
+                <svg className="w-full h-full" viewBox="0 0 200 200" fill="none">
+                  {/* Outer Torso Axial Contour */}
+                  <ellipse cx="100" cy="100" rx="90" ry="72" stroke="#2C2C2E" strokeWidth="2" fill="#0B0C0E" />
+                  
+                  {/* Rib Cage Contours */}
+                  <ellipse cx="100" cy="100" rx="84" ry="66" stroke="#3A3A3C" strokeWidth="1" strokeDasharray="6 4" />
+
+                  {/* Spine Posterior */}
+                  <rect x="91" y="140" width="18" height="18" rx="4" fill="#BF5AF2" opacity="0.8" />
+                  <circle cx="100" cy="149" r="4" fill="#0B0C0E" />
+
+                  {/* Liver (Right Anatomical Lobe) */}
+                  <path
+                    d="M 40 75 Q 35 115 65 135 Q 95 140 100 115 Q 98 80 70 65 Z"
+                    fill="#0A84FF"
+                    opacity="0.85"
+                  />
+
+                  {/* Spleen (Left Posterior) */}
+                  <path
+                    d="M 145 95 Q 165 110 160 135 Q 140 140 135 120 Z"
+                    fill="#30D158"
+                    opacity="0.85"
+                  />
+
+                  {/* Right Kidney */}
+                  <ellipse cx="68" cy="122" rx="14" ry="10" transform="rotate(-15 68 122)" fill="#FF9F0A" opacity="0.85" />
+
+                  {/* Left Kidney */}
+                  <ellipse cx="132" cy="122" rx="14" ry="10" transform="rotate(15 132 122)" fill="#FF9F0A" opacity="0.85" />
+
+                  {/* Aorta (Anterior to spine) */}
+                  <circle cx="92" cy="128" r="5" fill="#FF375F" opacity="0.9" />
+                  {/* IVC */}
+                  <circle cx="108" cy="128" r="6" fill="#64D2FF" opacity="0.9" />
+                </svg>
+
+                <span className="absolute bottom-1 text-[9px] font-mono text-[#86868B]/80 tracking-widest uppercase">
+                  Axial Level L2-L3
+                </span>
+              </div>
+
+              {/* Organ Volumetrics HUD */}
+              <div className="w-full flex-1 space-y-2.5">
+                {[
+                  { name: 'Liver Solid', vol: '1,428.4 cm³', hu: '58.2 HU', color: '#0A84FF' },
+                  { name: 'Spleen Solid', vol: '184.2 cm³', hu: '44.1 HU', color: '#30D158' },
+                  { name: 'Kidneys (L/R)', vol: '312.8 cm³', hu: '38.6 HU', color: '#FF9F0A' },
+                  { name: 'Vertebrae T1–L5', vol: '348.6 cm³', hu: '482 HU', color: '#BF5AF2' },
+                ].map((item) => (
+                  <div key={item.name} className="p-2.5 rounded-xl bg-[#141416] border border-white/[0.06] flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                      <span className="text-[#F5F5F7] font-medium">{item.name}</span>
+                    </div>
+                    <div className="text-right font-mono">
+                      <span className="text-[#F5F5F7] font-semibold">{item.vol}</span>
+                      <span className="text-[10px] text-[#86868B] ml-2">({item.hu})</span>
+                    </div>
                   </div>
-                  <span className="text-[11px] font-mono text-[#86868B] block">{item.vol}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex items-center justify-between text-xs font-mono text-[#86868B] border-t border-white/10 pt-4 z-10">
-              <span>Subprocess Sandbox</span>
-              <span className="text-[#F5F5F7]">59 Structures</span>
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Card 3: Zero-Shrinkage Taubin Meshes */}
-          <div className="w-[320px] sm:w-[420px] md:w-[480px] shrink-0 h-[480px] sm:h-[520px] rounded-[28px] bg-[#101012] p-8 sm:p-10 flex flex-col justify-between overflow-hidden relative snap-start border border-white/[0.04]">
-            <div className="space-y-2 z-10">
-              <span className="text-xs uppercase tracking-wider text-[#86868B] font-semibold block">
-                Geometry
-              </span>
-              <h3 className="text-2xl sm:text-3xl font-semibold text-[#F5F5F7] tracking-tight leading-snug">
-                Zero-shrinkage Taubin meshes.
-              </h3>
-              <p className="text-sm text-[#86868B] leading-relaxed max-w-sm">
-                Watertight 2-manifold Flying Edges surfaces.
-              </p>
-            </div>
-
-            {/* High-contrast Graphic */}
-            <div className="relative my-auto flex flex-col items-center justify-center py-4 space-y-3">
-              <div className="flex items-center gap-4 text-xs font-mono">
-                <span className="text-[#86868B]">Raw Voxel Grid</span>
-                <span className="text-[#0071E3]">→</span>
-                <span className="text-[#30D158]">Taubin Smooth</span>
+          {/* ─── Slide 3: Zero-Shrinkage Taubin Meshes ─────────────────── */}
+          <div className="w-[88vw] sm:w-[82vw] max-w-[1040px] shrink-0 snap-center min-h-[460px] md:min-h-[520px] rounded-[28px] bg-[#101012] border border-white/[0.06] p-8 sm:p-10 lg:p-12 flex flex-col lg:flex-row gap-8 justify-between relative overflow-hidden">
+            {/* Left Info Column */}
+            <div className="lg:w-[42%] shrink-0 flex flex-col justify-between space-y-6 z-10">
+              <div className="space-y-3">
+                <span className="text-xs uppercase tracking-wider text-[#86868B] font-semibold block">
+                  03 / Geometry
+                </span>
+                <h3 className="text-3xl sm:text-4xl lg:text-5xl font-semibold text-[#F5F5F7] tracking-tight leading-[1.08]">
+                  Zero-shrinkage Taubin meshes.
+                </h3>
+                <p className="text-sm sm:text-base leading-relaxed pt-1">
+                  <span className="text-[#F5F5F7] font-medium">Watertight 2-manifold Flying Edges. </span>
+                  <span className="text-[#86868B]">
+                    Two-pass Laplacian Taubin filtering (λ = +0.50, μ = -0.53) smooths voxel stair-steps while preserving 99.96% of true anatomical volume.
+                  </span>
+                </p>
               </div>
-              <div className="w-48 h-20 border border-white/10 rounded-2xl bg-[#161617] flex items-center justify-around px-4">
-                <div className="text-center">
-                  <span className="text-xs font-mono text-[#86868B] block">Δ Volume</span>
-                  <span className="text-base font-semibold text-[#30D158] font-mono">&lt; 0.1%</span>
-                </div>
-                <div className="h-8 w-px bg-white/10" />
-                <div className="text-center">
-                  <span className="text-xs font-mono text-[#86868B] block">Boundary</span>
-                  <span className="text-base font-semibold text-[#F5F5F7] font-mono">2-Manifold</span>
-                </div>
+
+              <div className="border-t border-white/10 pt-4 flex items-center justify-between text-xs font-mono text-[#86868B]">
+                <span>λ = +0.50 · μ = -0.53</span>
+                <span className="text-[#30D158] font-semibold">ΔV &lt; 0.05% (Zero Loss)</span>
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs font-mono text-[#86868B] border-t border-white/10 pt-4 z-10">
-              <span>λ=0.5 · μ=-0.53</span>
-              <span className="text-[#30D158]">Watertight</span>
+            {/* Right Rich Visual: Split Comparison */}
+            <div className="lg:w-[58%] flex-1 flex flex-col justify-center relative min-h-[260px] sm:min-h-[320px] rounded-2xl bg-black/50 border border-white/[0.04] p-5 sm:p-6 overflow-hidden space-y-5">
+              <div className="grid grid-cols-2 gap-4">
+                {/* Left Side: Raw Voxel Staircase */}
+                <div className="p-4 rounded-xl bg-[#141416] border border-red-500/20 space-y-3">
+                  <div className="flex items-center justify-between text-xs font-mono">
+                    <span className="text-red-400 font-semibold">Standard Laplacian</span>
+                    <span className="text-red-400">-8.4% ΔV</span>
+                  </div>
+                  {/* Stair-step voxel SVG */}
+                  <svg className="w-full h-24" viewBox="0 0 160 80" fill="none">
+                    <path
+                      d="M 10 70 L 30 70 L 30 50 L 60 50 L 60 30 L 100 30 L 100 50 L 130 50 L 130 70 L 150 70"
+                      stroke="#EF4444"
+                      strokeWidth="2"
+                    />
+                    <path
+                      d="M 10 70 L 30 70 L 30 50 L 60 50 L 60 30 L 100 30 L 100 50 L 130 50 L 130 70 L 150 70 L 150 78 L 10 78 Z"
+                      fill="rgba(239,68,68,0.12)"
+                    />
+                    <text x="80" y="20" fill="#EF4444" fontSize="9" fontFamily="monospace" textAnchor="middle">
+                      Shrinkage &amp; Volume Erosion
+                    </text>
+                  </svg>
+                  <span className="text-[11px] text-[#86868B] block">
+                    Severe volume loss on organ poles
+                  </span>
+                </div>
+
+                {/* Right Side: Taubin Curvature Preservation */}
+                <div className="p-4 rounded-xl bg-[#141416] border border-[#30D158]/30 space-y-3">
+                  <div className="flex items-center justify-between text-xs font-mono">
+                    <span className="text-[#30D158] font-semibold">Taubin Curvature</span>
+                    <span className="text-[#30D158]">0.0% ΔV</span>
+                  </div>
+                  {/* Smooth curved contour SVG */}
+                  <svg className="w-full h-24" viewBox="0 0 160 80" fill="none">
+                    <path
+                      d="M 10 70 Q 50 25 80 25 Q 110 25 150 70"
+                      stroke="#30D158"
+                      strokeWidth="2.2"
+                    />
+                    <path
+                      d="M 10 70 Q 50 25 80 25 Q 110 25 150 70 L 150 78 L 10 78 Z"
+                      fill="rgba(48,209,88,0.12)"
+                    />
+                    {/* Wireframe lattice lines */}
+                    <line x1="45" y1="45" x2="115" y2="45" stroke="#30D158" strokeWidth="0.8" strokeDasharray="3 2" />
+                    <line x1="80" y1="25" x2="80" y2="78" stroke="#30D158" strokeWidth="0.8" strokeDasharray="3 2" />
+                    <text x="80" y="16" fill="#30D158" fontSize="9" fontFamily="monospace" textAnchor="middle">
+                      Watertight 2-Manifold
+                    </text>
+                  </svg>
+                  <span className="text-[11px] text-[#86868B] block">
+                    Preserves exact anatomical boundary
+                  </span>
+                </div>
+              </div>
+
+              {/* Bottom Invariant Banner */}
+              <div className="flex items-center justify-between p-3 rounded-xl bg-[#141416] border border-white/[0.06] text-xs font-mono text-[#86868B]">
+                <span>Watertight: 100% Manifold</span>
+                <span className="text-[#F5F5F7]">Zero Self-Intersections</span>
+                <span className="text-[#30D158]">CAD / 3D Print Ready</span>
+              </div>
             </div>
           </div>
 
-          {/* Card 4: Clinical PDF in One Click */}
-          <div className="w-[320px] sm:w-[420px] md:w-[480px] shrink-0 h-[480px] sm:h-[520px] rounded-[28px] bg-[#101012] p-8 sm:p-10 flex flex-col justify-between overflow-hidden relative snap-start border border-white/[0.04]">
-            <div className="space-y-2 z-10">
-              <span className="text-xs uppercase tracking-wider text-[#86868B] font-semibold block">
-                Deliverables
-              </span>
-              <h3 className="text-2xl sm:text-3xl font-semibold text-[#F5F5F7] tracking-tight leading-snug">
-                Clinical PDF in one click.
-              </h3>
-              <p className="text-sm text-[#86868B] leading-relaxed max-w-sm">
-                Orthogonal views, HU stats, and CAD exports.
-              </p>
-            </div>
+          {/* ─── Slide 4: Clinical PDF in One Click ─────────────────────── */}
+          <div className="w-[88vw] sm:w-[82vw] max-w-[1040px] shrink-0 snap-center min-h-[460px] md:min-h-[520px] rounded-[28px] bg-[#101012] border border-white/[0.06] p-8 sm:p-10 lg:p-12 flex flex-col lg:flex-row gap-8 justify-between relative overflow-hidden">
+            {/* Left Info Column */}
+            <div className="lg:w-[42%] shrink-0 flex flex-col justify-between space-y-6 z-10">
+              <div className="space-y-3">
+                <span className="text-xs uppercase tracking-wider text-[#86868B] font-semibold block">
+                  04 / Deliverables
+                </span>
+                <h3 className="text-3xl sm:text-4xl lg:text-5xl font-semibold text-[#F5F5F7] tracking-tight leading-[1.08]">
+                  Clinical PDF in one click.
+                </h3>
+                <p className="text-sm sm:text-base leading-relaxed pt-1">
+                  <span className="text-[#F5F5F7] font-medium">1-page A4 executive report &amp; CAD export. </span>
+                  <span className="text-[#86868B]">
+                    Instant clinical PDF with orthogonal triptych, HU statistics, geometry verification audit, and watertight STL/GLB models for 3D printing.
+                  </span>
+                </p>
+              </div>
 
-            {/* High-contrast Graphic */}
-            <div className="my-auto flex flex-col items-center justify-center py-4 space-y-3">
-              <div className="w-44 h-28 rounded-xl bg-[#161617] border border-white/10 p-3 flex flex-col justify-between shadow-lg">
-                <div className="flex items-center justify-between text-[9px] font-mono text-[#86868B]">
-                  <span>1-PAGE EXECUTIVE A4</span>
-                  <span className="text-[#30D158]">VERIFIED</span>
-                </div>
-                <div className="grid grid-cols-3 gap-1">
-                  <div className="h-8 bg-black/60 rounded border border-white/5" />
-                  <div className="h-8 bg-black/60 rounded border border-white/5" />
-                  <div className="h-8 bg-black/60 rounded border border-white/5" />
-                </div>
-                <div className="flex justify-between text-[8px] font-mono text-[#86868B]">
-                  <span>STL · OBJ · GLB</span>
-                  <span>JSON Telemetry</span>
-                </div>
+              <div className="border-t border-white/10 pt-4 flex items-center justify-between text-xs font-mono text-[#86868B]">
+                <span>Standard A4 Output</span>
+                <span className="text-[#2997FF] font-semibold flex items-center gap-1.5">
+                  <FileCheck className="w-3.5 h-3.5" />
+                  Instant Download
+                </span>
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs font-mono text-[#86868B] border-t border-white/10 pt-4 z-10">
-              <span>Standard A4 Output</span>
-              <span className="text-[#2997FF]">Instant Download</span>
+            {/* Right Rich Visual: Angled Clinical Report Preview */}
+            <div className="lg:w-[58%] flex-1 flex items-center justify-center relative min-h-[260px] sm:min-h-[320px] rounded-2xl bg-black/50 border border-white/[0.04] p-5 sm:p-6 overflow-hidden">
+              <div className="w-full max-w-[380px] rounded-xl bg-[#161617] border border-white/15 p-4 shadow-2xl space-y-3">
+                {/* Simulated Report Header */}
+                <div className="flex items-center justify-between border-b border-white/10 pb-2 text-[10px] font-mono text-[#86868B]">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-[#0071E3]" />
+                    <span className="text-[#F5F5F7] font-semibold">SliceM Clinical Report</span>
+                  </div>
+                  <span className="text-[#30D158]">A4 EXECUTIVE</span>
+                </div>
+
+                {/* Orthogonal Triptych */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="p-2 rounded bg-black/80 border border-white/10 text-center space-y-1">
+                    <span className="text-[9px] font-mono text-[#86868B] block">AXIAL</span>
+                    <div className="h-12 rounded bg-[#0A84FF]/20 border border-[#0A84FF]/40 flex items-center justify-center text-[9px] font-mono text-[#0A84FF]">
+                      72 / 145
+                    </div>
+                  </div>
+                  <div className="p-2 rounded bg-black/80 border border-white/10 text-center space-y-1">
+                    <span className="text-[9px] font-mono text-[#86868B] block">CORONAL</span>
+                    <div className="h-12 rounded bg-[#30D158]/20 border border-[#30D158]/40 flex items-center justify-center text-[9px] font-mono text-[#30D158]">
+                      125 / 250
+                    </div>
+                  </div>
+                  <div className="p-2 rounded bg-black/80 border border-white/10 text-center space-y-1">
+                    <span className="text-[9px] font-mono text-[#86868B] block">SAGITTAL</span>
+                    <div className="h-12 rounded bg-[#FF9F0A]/20 border border-[#FF9F0A]/40 flex items-center justify-center text-[9px] font-mono text-[#FF9F0A]">
+                      125 / 250
+                    </div>
+                  </div>
+                </div>
+
+                {/* Verification Rows */}
+                <div className="space-y-1 text-[10px] font-mono bg-black/50 p-2.5 rounded border border-white/5">
+                  <div className="flex justify-between text-[#30D158]">
+                    <span>✓ Normal Vector Projection</span>
+                    <span>PASS (0.00 mm)</span>
+                  </div>
+                  <div className="flex justify-between text-[#30D158]">
+                    <span>✓ Middle-Anchor Gantry Deskew</span>
+                    <span>0.0° TILT</span>
+                  </div>
+                  <div className="flex justify-between text-[#30D158]">
+                    <span>✓ 2-Manifold Mesh Boundary</span>
+                    <span>WATERTIGHT</span>
+                  </div>
+                </div>
+
+                {/* Output Bundles Strip */}
+                <div className="flex items-center justify-between text-[9px] font-mono text-[#86868B] pt-1 border-t border-white/10">
+                  <span className="px-2 py-0.5 rounded bg-white/5">PDF</span>
+                  <span className="px-2 py-0.5 rounded bg-white/5">STL (Print)</span>
+                  <span className="px-2 py-0.5 rounded bg-white/5">GLB (3D)</span>
+                  <span className="px-2 py-0.5 rounded bg-white/5">JSON</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -678,7 +1158,7 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
                     <div
                       key={s}
                       className="w-8 h-20 rounded border border-white/20 bg-[#1C1C1E] flex items-center justify-center font-mono text-[10px] text-[#86868B]"
-                      style={{ opacity: 0.4 + (s * 0.1) }}
+                      style={{ opacity: 0.4 + s * 0.1 }}
                     >
                       {s * 8}
                     </div>

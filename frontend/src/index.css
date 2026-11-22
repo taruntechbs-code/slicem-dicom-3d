@@ -88,3 +88,12 @@ input[type="range"]::-moz-range-thumb {
 input[type="range"]::-moz-range-thumb:hover {
   transform: scale(1.15);
 }
+
+/* Print fallback: ensure no content is hidden by scroll reveal */
+@media print {
+  * {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
