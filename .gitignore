@@ -45,3 +45,6 @@ Thumbs.db
 *.pt
 *.bin
 *.onnx
+
+# Local test data
+Test zip files/

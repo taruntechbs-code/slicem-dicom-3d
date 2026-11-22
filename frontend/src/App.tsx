@@ -12,7 +12,7 @@ import { api, PhantomParams, PresetMeta } from './lib/api';
 import { CaseReport, HealthResponse } from './types/case';
 import { Stepper } from './components/Stepper';
 import { StatusBadge } from './components/StatusBadge';
-import { InspectStep } from './components/InspectStep';
+import { InspectStep, formatStructureName } from './components/InspectStep';
 import { ValidationDashboard } from './components/ValidationDashboard';
 
 const DEFAULT_STRUCTURE_COLORS_FE = [
@@ -202,6 +202,49 @@ export const App: React.FC = () => {
               <Stepper currentStep={currentStep} onSelectStep={(id) => setCurrentStep(id)} />
             </section>
 
+            {/* Live Pipeline Execution Progress Strip */}
+            <div className="p-3 rounded-2xl bg-[#141416] border border-white/[0.08] flex items-center justify-between gap-4 text-xs">
+              <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-0.5">
+                {[
+                  { step: 1, name: 'Load & Ingest', status: currentStep > 1 ? 'done' : currentStep === 1 ? 'active' : 'idle' },
+                  { step: 2, name: 'Geometry Verify', status: currentStep > 2 ? 'done' : currentStep === 2 ? 'active' : 'idle' },
+                  { step: 3, name: 'Motion SVR', status: currentStep > 3 ? 'done' : currentStep === 3 ? 'active' : 'idle' },
+                  { step: 4, name: 'AI Segmentation', status: currentStep > 4 ? 'done' : currentStep === 4 ? 'active' : 'idle' },
+                  { step: 5, name: 'Watertight Meshing', status: currentStep === 5 ? (activeCase.structures.some((st) => st.mesh_files?.glb) ? 'done' : 'active') : 'idle' },
+                ].map((st) => (
+                  <div key={st.step} className="flex items-center gap-2 shrink-0">
+                    <div className={`w-2 h-2 rounded-full ${
+                      st.status === 'done'
+                        ? 'bg-[#30D158]'
+                        : st.status === 'active'
+                        ? 'bg-[#0A84FF] animate-pulse ring-4 ring-[#0A84FF]/20'
+                        : 'bg-[#86868B]/40'
+                    }`} />
+                    <span className={`text-[11px] ${
+                      st.status === 'done'
+                        ? 'text-[#F5F5F7] font-medium'
+                        : st.status === 'active'
+                        ? 'text-[#0A84FF] font-semibold'
+                        : 'text-[#86868B]'
+                    }`}>
+                      {st.name}
+                    </span>
+                    {st.step < 5 && <span className="text-[#86868B]/30 ml-1">→</span>}
+                  </div>
+                ))}
+              </div>
+
+              {/* Pipeline Timings Pill */}
+              <div className="shrink-0 flex items-center gap-2 text-[11px] font-mono text-[#86868B]">
+                <span>Case: <strong className="text-[#F5F5F7] font-normal">{activeCase.case_id}</strong></span>
+                {Object.keys(activeCase.stage_timings_sec || {}).length > 0 && (
+                  <span className="hidden sm:inline text-[#86868B]/60">
+                    · {(Object.values(activeCase.stage_timings_sec).reduce((a, b) => a + b, 0)).toFixed(2)}s runtime
+                  </span>
+                )}
+              </div>
+            </div>
+
             {/* Dynamic Workspace Container */}
             <div className="bg-[#141416] border border-white/[0.08] rounded-2xl p-6 lg:p-8 shadow-xl">
               {currentStep === 1 && (
@@ -262,6 +305,74 @@ export const App: React.FC = () => {
 };
 
 /* ─── Step 1: Load View ─────────────────────────────────────────────── */
+interface DiagnosticError {
+  type: 'cold_start' | 'cors_network' | 'invalid_dicom' | 'generic';
+  title: string;
+  message: string;
+  detail?: string;
+  canRetry?: boolean;
+}
+
+function parseUploadError(err: unknown): DiagnosticError {
+  const msg = err instanceof Error ? err.message : String(err || '');
+  const lower = msg.toLowerCase();
+
+  if (
+    lower.includes('cold start') ||
+    lower.includes('waking up') ||
+    lower.includes('sleep') ||
+    lower.includes('failed to fetch') ||
+    lower.includes('networkerror') ||
+    lower.includes('502') ||
+    lower.includes('503') ||
+    lower.includes('504') ||
+    lower.includes('timeout')
+  ) {
+    return {
+      type: 'cold_start',
+      title: 'Backend Waking Up (Hugging Face ZeroGPU Cold Start)',
+      message: 'The free cloud GPU instance is spinning up from idle state. This usually takes 15–30 seconds.',
+      detail: msg,
+      canRetry: true,
+    };
+  }
+
+  if (lower.includes('cors') || lower.includes('cross-origin') || lower.includes('blocked by cors')) {
+    return {
+      type: 'cors_network',
+      title: 'Network / Cross-Origin Request Blocked',
+      message: 'The browser was unable to communicate with the API. Check that the backend allows this origin.',
+      detail: msg,
+      canRetry: true,
+    };
+  }
+
+  if (
+    lower.includes('dicom') ||
+    lower.includes('ipp') ||
+    lower.includes('iop') ||
+    lower.includes('slice') ||
+    lower.includes('unsupported format') ||
+    lower.includes('no images')
+  ) {
+    return {
+      type: 'invalid_dicom',
+      title: 'Invalid DICOM Series',
+      message: 'Unable to parse DICOM slices or physical patient coordinates (ImagePositionPatient / ImageOrientationPatient).',
+      detail: msg,
+      canRetry: false,
+    };
+  }
+
+  return {
+    type: 'generic',
+    title: 'Operation Failed',
+    message: msg || 'An unknown error occurred while processing the DICOM data.',
+    detail: msg,
+    canRetry: true,
+  };
+}
+
 interface LoadStepViewProps {
   activeCase: CaseReport;
   cases: CaseReport[];
@@ -276,10 +387,45 @@ const LoadStepView: React.FC<LoadStepViewProps> = ({
 }) => {
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [isUploading, setIsUploading] = useState<boolean>(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [diagnosticError, setDiagnosticError] = useState<DiagnosticError | null>(null);
+  const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
+  const [elapsedSec, setElapsedSec] = useState<number>(0);
   const [presets, setPresets] = useState<PresetMeta[]>([]);
   const [loadingPresetSlug, setLoadingPresetSlug] = useState<string | null>(null);
   const [showCustomPhantom, setShowCustomPhantom] = useState<boolean>(false);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    if (isUploading || isGenerating || loadingPresetSlug !== null) {
+      setElapsedSec(0);
+      timer = setInterval(() => {
+        setElapsedSec((prev) => +(prev + 0.1).toFixed(1));
+      }, 100);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [isUploading, isGenerating, loadingPresetSlug]);
+
+  useEffect(() => {
+    if (retryCountdown === null || retryCountdown <= 0) {
+      if (retryCountdown === 0) {
+        api.getHealth()
+          .then(() => {
+            setDiagnosticError(null);
+            setRetryCountdown(null);
+          })
+          .catch(() => {
+            setRetryCountdown(8);
+          });
+      }
+      return;
+    }
+    const timer = setTimeout(() => {
+      setRetryCountdown((prev) => (prev !== null ? prev - 1 : null));
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [retryCountdown]);
 
   useEffect(() => {
     api.listPresets()
@@ -289,12 +435,17 @@ const LoadStepView: React.FC<LoadStepViewProps> = ({
 
   const handleLoadPreset = async (slug: string) => {
     setLoadingPresetSlug(slug);
-    setUploadError(null);
+    setDiagnosticError(null);
+    setRetryCountdown(null);
     try {
       const newCase = await api.loadPreset(slug);
       onCaseCreated(newCase);
     } catch (err: unknown) {
-      setUploadError(err instanceof Error ? err.message : `Failed to load preset '${slug}'`);
+      const diag = parseUploadError(err);
+      setDiagnosticError(diag);
+      if (diag.type === 'cold_start') {
+        setRetryCountdown(10);
+      }
     } finally {
       setLoadingPresetSlug(null);
     }
@@ -310,7 +461,8 @@ const LoadStepView: React.FC<LoadStepViewProps> = ({
 
   const handleGeneratePhantom = async () => {
     setIsGenerating(true);
-    setUploadError(null);
+    setDiagnosticError(null);
+    setRetryCountdown(null);
     try {
       const params: PhantomParams = {
         shuffle_filenames: shuffleFilenames,
@@ -321,7 +473,11 @@ const LoadStepView: React.FC<LoadStepViewProps> = ({
       const newCase = await api.createPhantom(params);
       onCaseCreated(newCase);
     } catch (err: unknown) {
-      setUploadError(err instanceof Error ? err.message : 'Phantom generation failed');
+      const diag = parseUploadError(err);
+      setDiagnosticError(diag);
+      if (diag.type === 'cold_start') {
+        setRetryCountdown(10);
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -330,12 +486,17 @@ const LoadStepView: React.FC<LoadStepViewProps> = ({
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setIsUploading(true);
-    setUploadError(null);
+    setDiagnosticError(null);
+    setRetryCountdown(null);
     try {
       const newCase = await api.uploadDicom(files);
       onCaseCreated(newCase);
     } catch (err: unknown) {
-      setUploadError(err instanceof Error ? err.message : 'DICOM upload failed');
+      const diag = parseUploadError(err);
+      setDiagnosticError(diag);
+      if (diag.type === 'cold_start') {
+        setRetryCountdown(10);
+      }
     } finally {
       setIsUploading(false);
     }
@@ -385,10 +546,45 @@ const LoadStepView: React.FC<LoadStepViewProps> = ({
         )}
       </div>
 
-      {uploadError && (
-        <div className="p-3.5 rounded-2xl bg-[#FF453A]/10 border border-[#FF453A]/20 text-xs text-[#FF453A] flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0" />
-          <span>{uploadError}</span>
+      {diagnosticError && (
+        <div className={`p-4 rounded-2xl border text-xs space-y-2.5 transition-all ${
+          diagnosticError.type === 'cold_start'
+            ? 'bg-[#FF9F0A]/10 border-[#FF9F0A]/20 text-[#FF9F0A]'
+            : 'bg-[#FF453A]/10 border-[#FF453A]/20 text-[#FF453A]'
+        }`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-semibold block">{diagnosticError.title}</span>
+                <p className="text-[#86868B] mt-0.5 leading-relaxed">{diagnosticError.message}</p>
+                {diagnosticError.detail && (
+                  <p className="font-mono text-[10px] text-[#86868B]/80 mt-1 break-all">
+                    {diagnosticError.detail}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {diagnosticError.type === 'cold_start' && retryCountdown !== null && (
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="font-mono text-[11px] text-[#FF9F0A]">
+                  Auto-retry in {retryCountdown}s
+                </span>
+                <button
+                  onClick={() => {
+                    api.getHealth().then(() => {
+                      setDiagnosticError(null);
+                      setRetryCountdown(null);
+                    }).catch(() => {});
+                  }}
+                  className="px-2.5 py-1 rounded-full bg-[#FF9F0A]/20 hover:bg-[#FF9F0A]/30 text-[#FF9F0A] text-[11px] font-medium transition-all"
+                >
+                  Retry Now
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -421,7 +617,7 @@ const LoadStepView: React.FC<LoadStepViewProps> = ({
           </div>
           <div>
             <span className="text-sm font-medium text-[#F5F5F7] block">
-              {isUploading ? 'Ingesting DICOM series...' : 'Drop DICOM series (.dcm, .zip) or browse'}
+              {isUploading ? `Ingesting DICOM series (${elapsedSec}s)...` : 'Drop DICOM series (.dcm, .zip) or browse'}
             </span>
             <span className="text-xs text-[#86868B] mt-1 block">
               CT or MRI studies with physical patient coordinates
@@ -1430,7 +1626,7 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
                           className="w-2.5 h-2.5 rounded-full shrink-0"
                           style={{ backgroundColor: color }}
                         />
-                        <span className="font-medium capitalize">{st.name}</span>
+                        <span className="font-medium">{formatStructureName(st.name)}</span>
                       </div>
 
                       <div className="flex items-center gap-3 font-mono tabular-nums text-[11px]">

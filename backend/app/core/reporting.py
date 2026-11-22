@@ -121,8 +121,27 @@ class AppleReportPDF(FPDF):
 
 
 def _humanize_structure_name(name: str) -> str:
-    """Format anatomical structure identifier into clean title case."""
-    return clean_pdf_text(name).title()
+    """Format anatomical structure identifier into clean title case with lateral designations."""
+    if not name:
+        return ""
+    import re
+    clean = clean_pdf_text(name).strip()
+    lower = clean.lower()
+    suffix = ""
+    if lower.endswith(" right"):
+        clean = clean[:-6].strip()
+        suffix = " (Right)"
+    elif lower.endswith(" left"):
+        clean = clean[:-5].strip()
+        suffix = " (Left)"
+    words = clean.split()
+    capitalized = []
+    for w in words:
+        if re.match(r"^[a-zA-Z]\d+$", w) or w.lower() in ("ct", "mri", "hu", "ivc", "cad"):
+            capitalized.append(w.upper())
+        else:
+            capitalized.append(w.capitalize())
+    return " ".join(capitalized) + suffix
 
 
 def _humanize_engine_name(engine: Optional[str]) -> str:
@@ -355,7 +374,7 @@ def generate_case_pdf(case_dir: Path) -> bytes:
     # Right: Status Pill & Metadata
     badge_w, badge_h = 22.0, 5.5
     badge_x = PAGE_WIDTH - MARGIN - badge_w
-    badge_y = 13.5
+    badge_y = 12.0
     pdf.set_fill_color(*badge_bg)
     pdf.rect(badge_x, badge_y, badge_w, badge_h, style="F")
 
@@ -364,14 +383,44 @@ def generate_case_pdf(case_dir: Path) -> bytes:
     pdf.set_font("Helvetica", "B", 7.5)
     pdf.cell(badge_w, 4.0, status_str, align="C")
 
+    # If WARN, determine concise 1-line Warning Reason
+    warn_reason: Optional[str] = None
+    if report.geometry.status == "WARN" or status_str == "WARN":
+        z_sp = report.geometry.measured_spacing_mm or (report.scan.declared_thickness_mm or 0.0)
+        xy_sp = report.scan.pixel_spacing_mm[0] if report.scan.pixel_spacing_mm else 0.0
+        if report.geometry.warnings:
+            w_first = report.geometry.warnings[0].strip()
+            if "reordering" in w_first.lower():
+                warn_reason = "Non-monotonic IPP sequence (reordered along normal)"
+            elif "variable" in w_first.lower() or "non-equidistant" in w_first.lower():
+                warn_reason = "Non-equidistant slice gaps (resampled to isotropic)"
+            elif "spacing mismatch" in w_first.lower():
+                warn_reason = f"Spacing mismatch ({report.geometry.spacing_mismatch_mm or 0.0:.2f} mm delta)"
+            elif "missing slice" in w_first.lower():
+                warn_reason = f"{len(report.geometry.missing_slice_indices)} missing slice gap(s) detected"
+            elif "tilt" in w_first.lower():
+                warn_reason = f"Gantry tilt ({report.geometry.gantry_tilt_deg:.1f} deg detected)"
+            else:
+                warn_reason = w_first[:65]
+        elif xy_sp > 0 and z_sp > 1.25 * xy_sp:
+            warn_reason = f"Anisotropic acquisition ({z_sp:.2f} mm Z vs {xy_sp:.2f} mm XY; resampled)"
+        else:
+            warn_reason = "Anisotropic acquisition; resampled to isotropic grid"
+
+    if status_str == "WARN" and warn_reason:
+        pdf.set_xy(PAGE_WIDTH - MARGIN - 110.0, badge_y + badge_h + 0.8)
+        pdf.set_text_color(185, 119, 14)
+        pdf.set_font("Helvetica", "I", 6.2)
+        pdf.cell(110.0, 3.0, f"Warning Reason: {clean_pdf_text(warn_reason)}", align="R")
+
     # Case ID & Timestamp
     created_dt = report.created_at[:19].replace("T", " ")
-    pdf.set_xy(PAGE_WIDTH - MARGIN - 90.0, 20.0)
+    pdf.set_xy(PAGE_WIDTH - MARGIN - 90.0, 21.0 if (status_str == "WARN" and warn_reason) else 20.0)
     pdf.set_text_color(*C_TEXT)
     pdf.set_font("Courier", "B", 7.5)
     pdf.cell(90.0, 3.5, f"Case: {report.case_id}", align="R")
 
-    pdf.set_xy(PAGE_WIDTH - MARGIN - 90.0, 23.8)
+    pdf.set_xy(PAGE_WIDTH - MARGIN - 90.0, 24.5 if (status_str == "WARN" and warn_reason) else 23.8)
     pdf.set_text_color(*C_MUTED)
     pdf.set_font("Helvetica", "", 7.0)
     pdf.cell(90.0, 3.5, f"Acquired: {created_dt} UTC", align="R")
@@ -427,7 +476,7 @@ def generate_case_pdf(case_dir: Path) -> bytes:
     col_w = (CONTENT_WIDTH - 4.0) / 2.0  # 89.0 mm
     col1_x = MARGIN
     col2_x = MARGIN + col_w + 4.0
-    card_h = 42.0
+    card_h = 44.0
 
     # Draw Apple Cards
     pdf.set_fill_color(*C_CARD)
@@ -458,18 +507,32 @@ def generate_case_pdf(case_dir: Path) -> bytes:
         ("Missing Slice Gaps", missing_slice_label),
         ("Geometry Verification Status", report.geometry.status),
     ]
+    if (report.geometry.status == "WARN" or status_str == "WARN") and warn_reason:
+        geom_items.append(("Warning Reason", warn_reason))
 
-    row_y = curr_y + 7.5
+    row_y = curr_y + 7.2
+    row_step = 4.8 if len(geom_items) > 6 else 5.2
     for label, val in geom_items:
         pdf.set_xy(col1_x + 3.5, row_y)
         pdf.set_text_color(*C_MUTED)
         pdf.set_font("Helvetica", "", 6.8)
         pdf.cell(41.0, 4.8, label)
 
-        pdf.set_text_color(*C_TEXT)
-        pdf.set_font("Helvetica", "B" if label == "Geometry Verification Status" else "", 6.8)
+        if label == "Geometry Verification Status":
+            pdf.set_font("Helvetica", "B", 6.8)
+            if val == "PASS":
+                pdf.set_text_color(29, 131, 72)
+            else:
+                pdf.set_text_color(185, 119, 14)
+        elif label == "Warning Reason":
+            pdf.set_font("Helvetica", "I", 6.2)
+            pdf.set_text_color(185, 119, 14)
+        else:
+            pdf.set_font("Helvetica", "", 6.8)
+            pdf.set_text_color(*C_TEXT)
+
         pdf.cell(col_w - 45.0, 4.8, val)
-        row_y += 5.2
+        row_y += row_step
 
     # Right Card: Processing & Segmentation Telemetry
     pdf.set_xy(col2_x + 3.5, curr_y + 2.5)
@@ -520,7 +583,8 @@ def generate_case_pdf(case_dir: Path) -> bytes:
         ("Extracted Anatomical Solids", struct_count_str),
     ]
 
-    row_y = curr_y + 7.5
+    row_y = curr_y + 7.2
+    row_step = 4.8 if len(proc_items) > 6 else 5.2
     for label, val in proc_items:
         pdf.set_xy(col2_x + 3.5, row_y)
         pdf.set_text_color(*C_MUTED)
@@ -529,6 +593,8 @@ def generate_case_pdf(case_dir: Path) -> bytes:
 
         pdf.set_text_color(*C_TEXT)
         pdf.set_font("Helvetica", "B" if label == "Motion Verification Status" else "", 6.8)
+        pdf.cell(col_w - 45.0, 4.8, val)
+        row_y += row_step
         pdf.cell(col_w - 45.0, 4.8, val)
         row_y += 5.2
 
@@ -601,7 +667,7 @@ def generate_case_pdf(case_dir: Path) -> bytes:
     # Columns (Total: 182.0 mm)
     cols = [
         ("Structure", 42.0, "L"),
-        ("Volume (cm3)", 24.0, "R"),
+        ("Mesh Vol (cm3)*", 24.0, "R"),
         ("Surface Area (mm2)", 28.0, "R"),
         ("Mean Thk (mm)", 26.0, "R"),
         ("Intensity (HU)", 26.0, "R"),
@@ -684,6 +750,17 @@ def generate_case_pdf(case_dir: Path) -> bytes:
                 align="C",
             )
             curr_y += 4.8
+
+        pdf.set_xy(MARGIN, curr_y + 1.2)
+        pdf.set_text_color(*C_MUTED)
+        pdf.set_font("Helvetica", "I", 5.8)
+        pdf.cell(
+            CONTENT_WIDTH,
+            3.0,
+            "* Mesh Vol: Watertight 3D surface integral. Discrete 2D voxel mask volume may exhibit minor delta (<1%) due to curvature-preserving smoothing.",
+            align="L",
+        )
+        curr_y += 4.5
 
     # ─────────────────────────────────────────────────────────────────────────
     # 6. Pinned Footer (Pipeline Timings & Regulatory Disclaimer)

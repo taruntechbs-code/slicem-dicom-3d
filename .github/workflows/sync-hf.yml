@@ -1,0 +1,32 @@
+name: Sync to Hugging Face Spaces
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'app.py'
+      - 'packages.txt'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - 'README.md'
+
+jobs:
+  sync-to-hub:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Push to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "HF_TOKEN secret is not set, skipping sync to Hugging Face Spaces."
+            exit 0
+          fi
+          git push --force https://tarun00000007:$HF_TOKEN@huggingface.co/spaces/tarun00000007/slicem-api main:main

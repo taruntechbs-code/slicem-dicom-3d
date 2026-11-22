@@ -2,9 +2,92 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { Maximize2, Loader2 } from 'lucide-react';
+import { RotateCcw, Loader2 } from 'lucide-react';
 import { StructureReport } from '../types/case';
 import { api } from '../lib/api';
+
+/**
+ * Volume-preserving Laplacian Taubin smoothing filter (iterations=2, lambda=0.5, mu=-0.53).
+ * Eliminates CT stair-stepping ridges on 3D surfaces without shrinkage.
+ */
+function applyTaubinSmoothingToGeometry(
+  geometry: THREE.BufferGeometry,
+  isSmoothed: boolean,
+  iterations = 2,
+  lambda = 0.5,
+  mu = -0.53
+) {
+  const posAttr = geometry.attributes.position;
+  if (!posAttr) return;
+
+  if (!geometry.userData.rawPositions) {
+    geometry.userData.rawPositions = new Float32Array(posAttr.array);
+  }
+
+  if (isSmoothed) {
+    if (!geometry.userData.smoothedPositions) {
+      const vertexCount = posAttr.count;
+      const index = geometry.index;
+      if (!index) {
+        geometry.userData.smoothedPositions = geometry.userData.rawPositions.slice();
+      } else {
+        const indices = index.array;
+        const neighbors: Set<number>[] = Array.from({ length: vertexCount }, () => new Set());
+        for (let i = 0; i < indices.length; i += 3) {
+          const a = indices[i];
+          const b = indices[i + 1];
+          const c = indices[i + 2];
+          neighbors[a].add(b).add(c);
+          neighbors[b].add(a).add(c);
+          neighbors[c].add(a).add(b);
+        }
+
+        const currentPos = new Float32Array(geometry.userData.rawPositions);
+        const tempPos = new Float32Array(vertexCount * 3);
+
+        const performStep = (source: Float32Array, target: Float32Array, factor: number) => {
+          for (let i = 0; i < vertexCount; i++) {
+            const i3 = i * 3;
+            const nbrs = neighbors[i];
+            if (nbrs.size === 0) {
+              target[i3] = source[i3];
+              target[i3 + 1] = source[i3 + 1];
+              target[i3 + 2] = source[i3 + 2];
+              continue;
+            }
+            let avgX = 0, avgY = 0, avgZ = 0;
+            nbrs.forEach((n) => {
+              const n3 = n * 3;
+              avgX += source[n3];
+              avgY += source[n3 + 1];
+              avgZ += source[n3 + 2];
+            });
+            const deg = nbrs.size;
+            avgX /= deg;
+            avgY /= deg;
+            avgZ /= deg;
+
+            target[i3] = source[i3] + factor * (avgX - source[i3]);
+            target[i3 + 1] = source[i3 + 1] + factor * (avgY - source[i3 + 1]);
+            target[i3 + 2] = source[i3 + 2] + factor * (avgZ - source[i3 + 2]);
+          }
+        };
+
+        for (let it = 0; it < iterations; it++) {
+          performStep(currentPos, tempPos, lambda);
+          performStep(tempPos, currentPos, mu);
+        }
+        geometry.userData.smoothedPositions = currentPos;
+      }
+    }
+    (posAttr.array as Float32Array).set(geometry.userData.smoothedPositions);
+  } else {
+    (posAttr.array as Float32Array).set(geometry.userData.rawPositions);
+  }
+
+  posAttr.needsUpdate = true;
+  geometry.computeVertexNormals();
+}
 
 interface MeshViewport3DProps {
   caseId: string;
@@ -29,6 +112,7 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isSmoothed, setIsSmoothed] = useState<boolean>(true);
 
   // References for Three.js state
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -36,6 +120,7 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const meshesGroupRef = useRef<THREE.Group | null>(null);
+  const gridRef = useRef<THREE.GridHelper | null>(null);
   const meshMapRef = useRef<Map<number, THREE.Object3D>>(new Map());
   const initialCamPosRef = useRef<{ pos: THREE.Vector3; target: THREE.Vector3 } | null>(null);
 
@@ -49,6 +134,11 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z, 20.0);
+
+    // Auto-center orientation grid safely under the lowest anatomical vertex
+    if (gridRef.current) {
+      gridRef.current.position.set(center.x, box.min.y - 4.0, center.z);
+    }
 
     const fov = cameraRef.current.fov * (Math.PI / 180);
     const cameraDistance = ((maxDim / 2) / Math.tan(fov / 2)) * 1.8;
@@ -134,6 +224,7 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
     const grid = new THREE.GridHelper(200, 20, 0x1c1c1e, 0x141416);
     grid.position.y = -40;
     scene.add(grid);
+    gridRef.current = grid;
 
     // Group holding all loaded structure meshes
     const meshesGroup = new THREE.Group();
@@ -233,6 +324,9 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
             if ((child as THREE.Mesh).isMesh) {
               const mesh = child as THREE.Mesh;
               child.userData = { structureId: st.id };
+              if (mesh.geometry) {
+                applyTaubinSmoothingToGeometry(mesh.geometry, isSmoothed);
+              }
               if (mesh.material) {
                 const mat = (mesh.material as THREE.Material).clone() as THREE.MeshStandardMaterial;
                 mat.transparent = true;
@@ -263,7 +357,20 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
         }
       );
     });
-  }, [caseId, structures, frameScene]);
+  }, [caseId, structures, frameScene, isSmoothed]);
+
+  // Apply Taubin smoothing / raw vertex restore when toggle changes
+  useEffect(() => {
+    if (!meshesGroupRef.current) return;
+    meshesGroupRef.current.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        if (mesh.geometry) {
+          applyTaubinSmoothingToGeometry(mesh.geometry, isSmoothed);
+        }
+      }
+    });
+  }, [isSmoothed]);
 
   // Update visibility, opacity, wireframe, and highlight when props change
   useEffect(() => {
@@ -304,6 +411,18 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
       {/* Top Floating Frosted Controls */}
       <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
         <button
+          onClick={() => setIsSmoothed(!isSmoothed)}
+          className={`px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-xl transition-all duration-200 border ${
+            isSmoothed
+              ? 'bg-[#1C1C1E]/80 hover:bg-[#2C2C2E] text-[#30D158] border-white/[0.08]'
+              : 'bg-[#1C1C1E]/80 hover:bg-[#2C2C2E] text-[#FF9F0A] border-white/[0.08]'
+          }`}
+          title="Toggle Taubin Volume-Preserving Smoothing vs Raw Voxel Geometry"
+        >
+          {isSmoothed ? 'Smooth (Taubin)' : 'Raw Voxel'}
+        </button>
+
+        <button
           onClick={onToggleWireframe}
           className={`px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-xl transition-all duration-200 border ${
             wireframe
@@ -317,10 +436,10 @@ export const MeshViewport3D: React.FC<MeshViewport3DProps> = ({
 
         <button
           onClick={resetCamera}
-          className="p-1.5 rounded-full bg-[#1C1C1E]/80 hover:bg-[#2C2C2E] border border-white/[0.08] text-[#F5F5F7] backdrop-blur-xl transition-all duration-200"
+          className="p-1.5 rounded-full bg-[#1C1C1E]/80 hover:bg-[#2C2C2E] border border-white/[0.08] text-[#F5F5F7] backdrop-blur-xl transition-all duration-200 flex items-center justify-center"
           title="Reset Camera Framing"
         >
-          <Maximize2 className="w-3.5 h-3.5" />
+          <RotateCcw className="w-3.5 h-3.5" />
         </button>
       </div>
 
