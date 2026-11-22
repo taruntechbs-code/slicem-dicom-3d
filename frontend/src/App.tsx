@@ -1108,6 +1108,7 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
     structures.length > 0 ? structures.map((st) => st.id) : [1]
   );
   const [imageError, setImageError] = useState<boolean>(false);
+  const [segVersion, setSegVersion] = useState<number>(() => Date.now());
 
   useEffect(() => {
     if (structures.length > 0) {
@@ -1116,12 +1117,16 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
   }, [structures]);
 
   useEffect(() => {
+    setSegVersion(Date.now());
+  }, [activeCase.segmentation.runtime_sec, activeCase.segmentation.status]);
+
+  useEffect(() => {
     let active = true;
     const updateSliceCount = async () => {
       const count = await api.fetchOverlaySliceCount(activeCase.case_id, axis);
       if (active && count > 0) {
         setMaxSlices(count);
-        setSliceIndex((prev) => Math.min(prev, count - 1));
+        setSliceIndex(Math.floor(count / 2));
       }
     };
     updateSliceCount();
@@ -1133,7 +1138,7 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
 
   useEffect(() => {
     setImageError(false);
-  }, [sliceIndex, axis, opacity, visibleIds]);
+  }, [sliceIndex, axis, opacity, visibleIds, segVersion]);
 
   // Polling for async background segmentation
   useEffect(() => {
@@ -1149,8 +1154,13 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
           if (job.status === 'completed') {
             setIsRunning(false);
             setProgressPercent(100);
+            setSegVersion(Date.now());
+            setImageError(false);
             if (res.report) {
               onCaseUpdated(res.report);
+              if (res.report.structures && res.report.structures.length > 0) {
+                setVisibleIds(res.report.structures.map((st) => st.id));
+              }
             }
           } else if (job.status === 'failed') {
             setIsRunning(false);
@@ -1189,7 +1199,12 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
       } else {
         setIsRunning(false);
         setProgressPercent(100);
+        setSegVersion(Date.now());
+        setImageError(false);
         onCaseUpdated(response);
+        if (response.structures && response.structures.length > 0) {
+          setVisibleIds(response.structures.map((st) => st.id));
+        }
       }
     } catch (err: unknown) {
       setIsRunning(false);
@@ -1203,12 +1218,21 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
     );
   };
 
+  const effectiveVersion = `${segVersion}_${opacity}_${visibleIds.join('-')}`;
+  const effectiveVisibleIds =
+    visibleIds.length > 0
+      ? visibleIds
+      : structures.length > 0
+      ? structures.map((st) => st.id)
+      : undefined;
+
   const overlayUrl = api.getOverlaySliceUrl(
     activeCase.case_id,
     axis,
     sliceIndex,
     opacity,
-    visibleIds
+    effectiveVisibleIds,
+    effectiveVersion
   );
 
   return (

@@ -248,11 +248,15 @@ export const api = {
     axis: 'axial' | 'coronal' | 'sagittal',
     index: number,
     opacity: number = 0.45,
-    visibleIds?: number[]
+    visibleIds?: number[],
+    version?: string | number
   ): string => {
     let url = `${API_BASE_URL}/api/cases/${encodeURIComponent(caseId)}/overlay/${axis}/${index}?opacity=${opacity}`;
     if (visibleIds && visibleIds.length > 0) {
       url += `&visible_ids=${visibleIds.join(',')}`;
+    }
+    if (version !== undefined && version !== null) {
+      url += `&v=${encodeURIComponent(String(version))}`;
     }
     return url;
   },
