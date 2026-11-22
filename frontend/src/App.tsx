@@ -14,6 +14,7 @@ import { Stepper } from './components/Stepper';
 import { StatusBadge } from './components/StatusBadge';
 import { InspectStep, formatStructureName } from './components/InspectStep';
 import { ValidationDashboard } from './components/ValidationDashboard';
+import { LandingFrontage } from './components/LandingFrontage';
 
 const DEFAULT_STRUCTURE_COLORS_FE = [
   '#0A84FF', '#30D158', '#FF9F0A', '#BF5AF2', '#FF375F',
@@ -65,12 +66,13 @@ const FALLBACK_DEMO_CASE: CaseReport = {
 };
 
 export const App: React.FC = () => {
-  const [appMode, setAppMode] = useState<'pipeline' | 'benchmarks'>('pipeline');
+  const [appMode, setAppMode] = useState<'overview' | 'pipeline' | 'benchmarks'>('overview');
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [backendHealth, setBackendHealth] = useState<HealthResponse | null>(null);
   const [isBackendConnected, setIsBackendConnected] = useState<boolean | null>(null);
   const [cases, setCases] = useState<CaseReport[]>([]);
   const [activeCase, setActiveCase] = useState<CaseReport>(FALLBACK_DEMO_CASE);
+  const [frontageLoadingPreset, setFrontageLoadingPreset] = useState<string | null>(null);
 
   // Poll backend health
   const checkHealth = useCallback(async () => {
@@ -114,6 +116,22 @@ export const App: React.FC = () => {
       return exists ? prev.map((c) => (c.case_id === newCase.case_id ? newCase : c)) : [newCase, ...prev];
     });
     setCurrentStep(2);
+    setAppMode('pipeline');
+  };
+
+  const handleLoadPresetFromFrontage = async (slug: string) => {
+    setFrontageLoadingPreset(slug);
+    try {
+      const newCase = await api.loadPreset(slug);
+      handleCaseCreatedOrSelected(newCase);
+    } catch (err: unknown) {
+      console.error(`Failed to load preset '${slug}' from frontage:`, err);
+      // Fallback to pipeline Step 1 so the user gets the structured diagnostic card & auto-retry
+      setAppMode('pipeline');
+      setCurrentStep(1);
+    } finally {
+      setFrontageLoadingPreset(null);
+    }
   };
 
   return (
@@ -122,8 +140,13 @@ export const App: React.FC = () => {
       <header className="sticky top-0 z-40 h-[52px] bg-[#1C1C1E]/80 backdrop-blur-xl border-b border-white/[0.08] px-6 whitespace-nowrap">
         <div className="max-w-7xl h-full mx-auto flex items-center justify-between gap-4">
           {/* Left: Clean SliceM wordmark + tiny 6px backend status dot */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            <span className="text-sm font-semibold tracking-tight text-[#F5F5F7]">SliceM</span>
+          <div
+            onClick={() => setAppMode('overview')}
+            className="flex items-center gap-2.5 shrink-0 cursor-pointer group"
+          >
+            <span className="text-sm font-semibold tracking-tight text-[#F5F5F7] group-hover:text-white transition-colors">
+              SliceM
+            </span>
             <span
               title={
                 isBackendConnected
@@ -140,11 +163,21 @@ export const App: React.FC = () => {
             />
           </div>
 
-          {/* Center: Apple-style pill segmented control (Pipeline | Benchmarks) */}
+          {/* Center: Apple-style pill segmented control (Overview | Pipeline | Benchmarks) */}
           <div className="flex items-center p-0.5 rounded-full bg-black/60 border border-white/[0.06] shrink-0">
             <button
+              onClick={() => setAppMode('overview')}
+              className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
+                appMode === 'overview'
+                  ? 'bg-[#2C2C2E] text-[#F5F5F7] shadow-sm'
+                  : 'text-[#86868B] hover:text-[#F5F5F7]'
+              }`}
+            >
+              Overview
+            </button>
+            <button
               onClick={() => setAppMode('pipeline')}
-              className={`px-4 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
+              className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
                 appMode === 'pipeline'
                   ? 'bg-[#2C2C2E] text-[#F5F5F7] shadow-sm'
                   : 'text-[#86868B] hover:text-[#F5F5F7]'
@@ -154,7 +187,7 @@ export const App: React.FC = () => {
             </button>
             <button
               onClick={() => setAppMode('benchmarks')}
-              className={`px-4 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
+              className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
                 appMode === 'benchmarks'
                   ? 'bg-[#2C2C2E] text-[#F5F5F7] shadow-sm'
                   : 'text-[#86868B] hover:text-[#F5F5F7]'
@@ -164,14 +197,17 @@ export const App: React.FC = () => {
             </button>
           </div>
 
-          {/* Right: Minimal Case selector dropdown (only shown when cases exist) */}
+          {/* Right: Minimal Case selector dropdown */}
           <div className="flex items-center gap-2 shrink-0">
-            {cases.length > 0 && appMode === 'pipeline' && (
+            {cases.length > 0 && (
               <select
                 value={activeCase.case_id}
                 onChange={(e) => {
                   const found = cases.find((c) => c.case_id === e.target.value);
-                  if (found) setActiveCase(found);
+                  if (found) {
+                    setActiveCase(found);
+                    setAppMode('pipeline');
+                  }
                 }}
                 className="bg-[#1C1C1E] border border-white/[0.08] text-[#F5F5F7] text-xs font-mono rounded-full px-3 py-1 outline-none hover:bg-[#2C2C2E] transition-colors cursor-pointer"
               >
@@ -188,7 +224,16 @@ export const App: React.FC = () => {
 
       {/* ─── Main Content ───────────────────────────────────────── */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-6 lg:p-8 space-y-6">
-        {appMode === 'benchmarks' ? (
+        {appMode === 'overview' ? (
+          <LandingFrontage
+            onLaunchWorkspace={() => setAppMode('pipeline')}
+            onExploreBenchmarks={() => setAppMode('benchmarks')}
+            onLoadPreset={handleLoadPresetFromFrontage}
+            loadingPresetSlug={frontageLoadingPreset}
+            isBackendConnected={isBackendConnected}
+            backendVersion={backendHealth?.version}
+          />
+        ) : appMode === 'benchmarks' ? (
           <div className="bg-[#141416] border border-white/[0.08] rounded-2xl p-6 shadow-xl">
             <ValidationDashboard />
           </div>
