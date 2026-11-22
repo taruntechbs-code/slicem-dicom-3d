@@ -1218,67 +1218,184 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
           <h2 className="text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight text-[#F5F5F7]">
             Try a calibrated study.
           </h2>
-          <p className="text-base text-[#86868B] max-w-lg mx-auto">
-            Instant DICOM benchmarks pre-configured with known ground-truth geometry.
+          <p className="text-base sm:text-lg text-[#86868B] max-w-xl mx-auto text-balance leading-relaxed">
+            Instant DICOM benchmarks with known ground-truth geometry.
           </p>
         </div>
 
         {/* 3 High-Contrast Study Tiles */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Preset 1 */}
+          {/* Preset 1: Clean Sphere Phantom */}
           <div
             onClick={() => onLoadPreset('synthetic_sphere_clean')}
-            className="rounded-[24px] bg-[#161617] hover:bg-[#1D1D1F] border border-white/[0.06] hover:border-white/20 p-7 transition-all duration-200 cursor-pointer flex flex-col justify-between group space-y-6"
+            className="group relative rounded-[28px] bg-[#121214] border border-white/[0.08] hover:border-white/[0.18] p-6 sm:p-7 transition-all duration-300 hover:-translate-y-1 cursor-pointer flex flex-col justify-between overflow-hidden shadow-[0_4px_24px_rgba(0,0,0,0.4)] hover:shadow-[0_12px_36px_rgba(0,0,0,0.6)] space-y-6 before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-white/15 before:to-transparent"
           >
-            <div className="space-y-3">
-              <div className="flex items-center justify-between text-xs font-mono">
-                <span className="text-[#30D158] font-medium">0.00 mm ERROR</span>
-                <span className="text-[#86868B]">1.00 SPHERICITY</span>
+            <div>
+              {/* Micro-Visual Stage: Centered Calibration Sphere with Equidistant Slices */}
+              <div className="relative w-full h-36 sm:h-40 rounded-2xl bg-[#09090B] border border-white/[0.04] overflow-hidden flex items-center justify-center mb-6">
+                {/* Radial ambient tint */}
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(48,209,88,0.12)_0%,rgba(48,209,88,0.02)_60%,transparent_80%)] pointer-events-none" />
+
+                {/* SVG Schematic */}
+                <svg
+                  viewBox="0 0 240 120"
+                  className="w-full h-full select-none pointer-events-none"
+                >
+                  <defs>
+                    <radialGradient id="cleanSphereGlow" cx="50%" cy="50%" r="50%">
+                      <stop offset="0%" stopColor="#30D158" stopOpacity="0.22" />
+                      <stop offset="70%" stopColor="#30D158" stopOpacity="0.04" />
+                      <stop offset="100%" stopColor="#30D158" stopOpacity="0" />
+                    </radialGradient>
+                  </defs>
+
+                  {/* Corner registration reticle brackets */}
+                  <path d="M 32 28 L 32 18 L 42 18" stroke="#30D158" strokeWidth="1" strokeOpacity="0.35" fill="none" className="group-hover:stroke-opacity-70 transition-opacity duration-300" />
+                  <path d="M 208 28 L 208 18 L 198 18" stroke="#30D158" strokeWidth="1" strokeOpacity="0.35" fill="none" className="group-hover:stroke-opacity-70 transition-opacity duration-300" />
+                  <path d="M 32 92 L 32 102 L 42 102" stroke="#30D158" strokeWidth="1" strokeOpacity="0.35" fill="none" className="group-hover:stroke-opacity-70 transition-opacity duration-300" />
+                  <path d="M 208 92 L 208 102 L 198 102" stroke="#30D158" strokeWidth="1" strokeOpacity="0.35" fill="none" className="group-hover:stroke-opacity-70 transition-opacity duration-300" />
+
+                  {/* Cardinal reticle tick marks */}
+                  <line x1="120" y1="12" x2="120" y2="20" stroke="#30D158" strokeWidth="1.2" strokeOpacity="0.75" />
+                  <line x1="120" y1="100" x2="120" y2="108" stroke="#30D158" strokeWidth="1.2" strokeOpacity="0.75" />
+                  <line x1="72" y1="60" x2="80" y2="60" stroke="#30D158" strokeWidth="1.2" strokeOpacity="0.75" />
+                  <line x1="160" y1="60" x2="168" y2="60" stroke="#30D158" strokeWidth="1.2" strokeOpacity="0.75" />
+
+                  {/* 5 Equidistant Parallel Slices */}
+                  <line x1="68" y1="36" x2="172" y2="36" stroke="#F5F5F7" strokeWidth="1" strokeOpacity="0.3" strokeDasharray="2 3" className="group-hover:stroke-opacity-60 transition-opacity duration-300" />
+                  <line x1="52" y1="48" x2="188" y2="48" stroke="#F5F5F7" strokeWidth="1" strokeOpacity="0.45" className="group-hover:stroke-opacity-75 transition-opacity duration-300" />
+                  <line x1="42" y1="60" x2="198" y2="60" stroke="#30D158" strokeWidth="1.2" strokeOpacity="0.8" className="group-hover:stroke-opacity-100 transition-opacity duration-300" />
+                  <line x1="52" y1="72" x2="188" y2="72" stroke="#F5F5F7" strokeWidth="1" strokeOpacity="0.45" className="group-hover:stroke-opacity-75 transition-opacity duration-300" />
+                  <line x1="68" y1="84" x2="172" y2="84" stroke="#F5F5F7" strokeWidth="1" strokeOpacity="0.3" strokeDasharray="2 3" className="group-hover:stroke-opacity-60 transition-opacity duration-300" />
+
+                  {/* Glowing Calibration Sphere */}
+                  <circle cx="120" cy="60" r="38" fill="url(#cleanSphereGlow)" stroke="#30D158" strokeWidth="1" strokeOpacity="0.35" />
+                  <circle cx="120" cy="60" r="22" fill="none" stroke="#30D158" strokeWidth="0.8" strokeDasharray="3 3" strokeOpacity="0.35" />
+
+                  {/* Subtle illuminating calibration ring on hover */}
+                  <circle
+                    cx="120"
+                    cy="60"
+                    r="38"
+                    fill="none"
+                    stroke="#30D158"
+                    strokeWidth="1.5"
+                    className="opacity-30 group-hover:opacity-100 transition-all duration-500 ease-out"
+                    style={{ filter: 'drop-shadow(0 0 8px rgba(48,209,88,0.65))' }}
+                  />
+                  <circle cx="120" cy="60" r="2.5" fill="#30D158" />
+
+                  {/* Telemetry baseline watermark */}
+                  <text x="120" y="113" textAnchor="middle" fill="#30D158" fillOpacity="0.65" fontSize="7.5" fontFamily="monospace" letterSpacing="0.08em">
+                    ΔV = 0.00% · ISOTROPIC 1.0mm
+                  </text>
+                </svg>
               </div>
-              <h3 className="text-2xl font-semibold text-[#F5F5F7] tracking-tight">
+
+              {/* Eyebrow badge */}
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#30D158]/10 border border-[#30D158]/20 text-[11px] font-mono tabular-nums text-[#30D158] mb-3">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#30D158] animate-pulse" />
+                <span>Baseline · 0.00 mm</span>
+              </div>
+
+              {/* Title & Description */}
+              <h3 className="text-xl sm:text-2xl font-semibold text-[#F5F5F7] tracking-tight mb-2">
                 Clean Sphere Phantom
               </h3>
-              <p className="text-xs sm:text-sm leading-relaxed">
+              <p className="text-xs sm:text-sm leading-relaxed text-[#86868B]">
                 <span className="text-[#F5F5F7] font-medium">Monotonic DICOM baseline. </span>
-                <span className="text-[#86868B]">Equidistant slices and calibrated HU density validating zero volume delta.</span>
+                Equidistant slices and calibrated HU density validating zero volume delta.
               </p>
             </div>
 
-            <div className="flex items-center gap-1.5 text-xs text-[#2997FF] group-hover:text-[#52aaff] transition-colors font-medium pt-2">
+            {/* Link */}
+            <div className="flex items-center gap-1.5 text-xs text-[#2997FF] group-hover:text-[#52aaff] transition-colors font-medium pt-3 border-t border-white/[0.04]">
               {loadingPresetSlug === 'synthetic_sphere_clean' ? (
                 <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-[#30D158]" />
                   <span>Loading study...</span>
                 </>
               ) : (
                 <>
-                  <span>Load benchmark study</span>
-                  <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                  <span>Run study</span>
+                  <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform duration-200" />
                 </>
               )}
             </div>
           </div>
 
-          {/* Preset 2 */}
+          {/* Preset 2: 12° Gantry Tilt */}
           <div
             onClick={() => onLoadPreset('synthetic_sphere_tilt_12deg')}
-            className="rounded-[24px] bg-[#161617] hover:bg-[#1D1D1F] border border-white/[0.06] hover:border-white/20 p-7 transition-all duration-200 cursor-pointer flex flex-col justify-between group space-y-6"
+            className="group relative rounded-[28px] bg-[#121214] border border-white/[0.08] hover:border-white/[0.18] p-6 sm:p-7 transition-all duration-300 hover:-translate-y-1 cursor-pointer flex flex-col justify-between overflow-hidden shadow-[0_4px_24px_rgba(0,0,0,0.4)] hover:shadow-[0_12px_36px_rgba(0,0,0,0.6)] space-y-6 before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-white/15 before:to-transparent"
           >
-            <div className="space-y-3">
-              <div className="flex items-center justify-between text-xs font-mono">
-                <span className="text-[#FF9F0A] font-medium">12.0° TILT</span>
-                <span className="text-[#86868B]">MIDDLE-ANCHOR</span>
+            <div>
+              {/* Micro-Visual Stage: Sheared Stack around Middle-Anchor Axis */}
+              <div className="relative w-full h-36 sm:h-40 rounded-2xl bg-[#09090B] border border-white/[0.04] overflow-hidden flex items-center justify-center mb-6">
+                {/* Radial ambient tint */}
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,159,10,0.12)_0%,rgba(255,159,10,0.02)_60%,transparent_80%)] pointer-events-none" />
+
+                {/* SVG Schematic */}
+                <svg
+                  viewBox="0 0 240 120"
+                  className="w-full h-full select-none pointer-events-none"
+                >
+                  {/* Fixed Middle Anchor Axis */}
+                  <line x1="28" y1="60" x2="212" y2="60" stroke="#FF9F0A" strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.4" />
+                  <circle cx="40" cy="60" r="2.5" fill="#FF9F0A" fillOpacity="0.8" />
+                  <circle cx="200" cy="60" r="2.5" fill="#FF9F0A" fillOpacity="0.8" />
+                  <text x="32" y="53" fill="#FF9F0A" fillOpacity="0.75" fontSize="7" fontFamily="monospace">
+                    ANCHOR Z₀
+                  </text>
+
+                  {/* Tilt Angle Arc */}
+                  <path d="M 188 34 A 32 32 0 0 0 178 58" fill="none" stroke="#FF9F0A" strokeWidth="1" strokeDasharray="2 2" strokeOpacity="0.6" />
+                  <text x="195" y="44" fill="#FF9F0A" fillOpacity="0.85" fontSize="7.5" fontFamily="monospace">
+                    θ = 12°
+                  </text>
+
+                  {/* Sheared Slices Group: deskews upright to 0deg on hover around middle anchor */}
+                  <g
+                    style={{ transformOrigin: '120px 60px', transformBox: 'view-box' }}
+                    className="transition-transform duration-500 ease-out -skew-x-[12deg] group-hover:skew-x-0"
+                  >
+                    {/* Slice 1 (y = 22) */}
+                    <rect x="65" y="22" width="110" height="7" rx="3.5" fill="#FF9F0A" fillOpacity="0.14" stroke="#FF9F0A" strokeWidth="1" strokeOpacity="0.4" className="group-hover:fill-opacity-25 group-hover:stroke-opacity-80 transition-all duration-300" />
+                    {/* Slice 2 (y = 38) */}
+                    <rect x="65" y="38" width="110" height="7" rx="3.5" fill="#FF9F0A" fillOpacity="0.18" stroke="#FF9F0A" strokeWidth="1" strokeOpacity="0.5" className="group-hover:fill-opacity-30 group-hover:stroke-opacity-85 transition-all duration-300" />
+                    {/* Slice 3 (y = 54, Middle Anchor Slice) */}
+                    <rect x="65" y="54" width="110" height="8" rx="4" fill="#FF9F0A" fillOpacity="0.32" stroke="#FF9F0A" strokeWidth="1.2" strokeOpacity="0.9" style={{ filter: 'drop-shadow(0 0 6px rgba(255,159,10,0.5))' }} />
+                    {/* Slice 4 (y = 70) */}
+                    <rect x="65" y="70" width="110" height="7" rx="3.5" fill="#FF9F0A" fillOpacity="0.18" stroke="#FF9F0A" strokeWidth="1" strokeOpacity="0.5" className="group-hover:fill-opacity-30 group-hover:stroke-opacity-85 transition-all duration-300" />
+                    {/* Slice 5 (y = 86) */}
+                    <rect x="65" y="86" width="110" height="7" rx="3.5" fill="#FF9F0A" fillOpacity="0.14" stroke="#FF9F0A" strokeWidth="1" strokeOpacity="0.4" className="group-hover:fill-opacity-25 group-hover:stroke-opacity-80 transition-all duration-300" />
+                  </g>
+
+                  {/* Telemetry watermark */}
+                  <text x="120" y="113" textAnchor="middle" fill="#FF9F0A" fillOpacity="0.65" fontSize="7.5" fontFamily="monospace" letterSpacing="0.08em">
+                    AFFINE SHEAR DESKEW · 0 CLIP
+                  </text>
+                </svg>
               </div>
-              <h3 className="text-2xl font-semibold text-[#F5F5F7] tracking-tight">
+
+              {/* Eyebrow badge */}
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#FF9F0A]/10 border border-[#FF9F0A]/20 text-[11px] font-mono tabular-nums text-[#FF9F0A] mb-3">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#FF9F0A]" />
+                <span>Deskew · 12.0° Tilt</span>
+              </div>
+
+              {/* Title & Description */}
+              <h3 className="text-xl sm:text-2xl font-semibold text-[#F5F5F7] tracking-tight mb-2">
                 12° Gantry Tilt
               </h3>
-              <p className="text-xs sm:text-sm leading-relaxed">
+              <p className="text-xs sm:text-sm leading-relaxed text-[#86868B]">
                 <span className="text-[#F5F5F7] font-medium">Detector inclination test. </span>
-                <span className="text-[#86868B]">Verifies shear deskew transformation and zero canvas-edge anatomy clipping.</span>
+                Verifies shear deskew transformation and zero canvas-edge anatomy clipping.
               </p>
             </div>
 
-            <div className="flex items-center gap-1.5 text-xs text-[#2997FF] group-hover:text-[#52aaff] transition-colors font-medium pt-2">
+            {/* Link */}
+            <div className="flex items-center gap-1.5 text-xs text-[#2997FF] group-hover:text-[#52aaff] transition-colors font-medium pt-3 border-t border-white/[0.04]">
               {loadingPresetSlug === 'synthetic_sphere_tilt_12deg' ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-[#FF9F0A]" />
@@ -1286,33 +1403,89 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
                 </>
               ) : (
                 <>
-                  <span>Load benchmark study</span>
-                  <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                  <span>Run study</span>
+                  <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform duration-200" />
                 </>
               )}
             </div>
           </div>
 
-          {/* Preset 3 */}
+          {/* Preset 3: 5 mm Patient Motion */}
           <div
             onClick={() => onLoadPreset('synthetic_sphere_motion_5mm')}
-            className="rounded-[24px] bg-[#161617] hover:bg-[#1D1D1F] border border-white/[0.06] hover:border-white/20 p-7 transition-all duration-200 cursor-pointer flex flex-col justify-between group space-y-6"
+            className="group relative rounded-[28px] bg-[#121214] border border-white/[0.08] hover:border-white/[0.18] p-6 sm:p-7 transition-all duration-300 hover:-translate-y-1 cursor-pointer flex flex-col justify-between overflow-hidden shadow-[0_4px_24px_rgba(0,0,0,0.4)] hover:shadow-[0_12px_36px_rgba(0,0,0,0.6)] space-y-6 before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-white/15 before:to-transparent"
           >
-            <div className="space-y-3">
-              <div className="flex items-center justify-between text-xs font-mono">
-                <span className="text-[#0071E3] font-medium">5.00 mm SHIFT</span>
-                <span className="text-[#86868B]">2D-3D SVR</span>
+            <div>
+              {/* Micro-Visual Stage: Jittered Slices with Guide Rails */}
+              <div className="relative w-full h-36 sm:h-40 rounded-2xl bg-[#09090B] border border-white/[0.04] overflow-hidden flex items-center justify-center mb-6">
+                {/* Radial ambient tint */}
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(10,132,255,0.12)_0%,rgba(56,189,248,0.02)_60%,transparent_80%)] pointer-events-none" />
+
+                {/* SVG Schematic */}
+                <svg
+                  viewBox="0 0 240 120"
+                  className="w-full h-full select-none pointer-events-none"
+                >
+                  {/* Subtle Alignment Guide Rails */}
+                  <line x1="65" y1="14" x2="65" y2="98" stroke="#0A84FF" strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.3" className="group-hover:stroke-opacity-70 transition-opacity duration-500" />
+                  <line x1="175" y1="14" x2="175" y2="98" stroke="#0A84FF" strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.3" className="group-hover:stroke-opacity-70 transition-opacity duration-500" />
+                  <line x1="120" y1="14" x2="120" y2="98" stroke="#38BDF8" strokeWidth="1" strokeDasharray="2 3" strokeOpacity="0.25" className="group-hover:stroke-opacity-60 transition-opacity duration-500" />
+
+                  {/* 5 Slice Planes with Jitter Offsets: glide back into vertical alignment (translate-x-0) on hover */}
+                  {/* Slice 1 (y = 22): offset -12px */}
+                  <g className="transition-transform duration-500 ease-out -translate-x-3 group-hover:translate-x-0">
+                    <rect x="65" y="22" width="110" height="7" rx="3.5" fill="#0A84FF" fillOpacity="0.16" stroke="#38BDF8" strokeWidth="1" strokeOpacity="0.45" className="group-hover:fill-opacity-25 group-hover:stroke-opacity-80 transition-all duration-300" />
+                    <line x1="56" y1="25.5" x2="62" y2="25.5" stroke="#38BDF8" strokeWidth="1" strokeOpacity="0.4" />
+                  </g>
+
+                  {/* Slice 2 (y = 38): offset +14px */}
+                  <g className="transition-transform duration-500 ease-out translate-x-3.5 group-hover:translate-x-0">
+                    <rect x="65" y="38" width="110" height="7" rx="3.5" fill="#0A84FF" fillOpacity="0.22" stroke="#38BDF8" strokeWidth="1" strokeOpacity="0.55" className="group-hover:fill-opacity-30 group-hover:stroke-opacity-85 transition-all duration-300" />
+                    <line x1="178" y1="41.5" x2="184" y2="41.5" stroke="#38BDF8" strokeWidth="1" strokeOpacity="0.4" />
+                  </g>
+
+                  {/* Slice 3 (y = 54): offset -8px */}
+                  <g className="transition-transform duration-500 ease-out -translate-x-2 group-hover:translate-x-0">
+                    <rect x="65" y="54" width="110" height="8" rx="4" fill="#0A84FF" fillOpacity="0.30" stroke="#38BDF8" strokeWidth="1.2" strokeOpacity="0.8" style={{ filter: 'drop-shadow(0 0 6px rgba(10,132,255,0.4))' }} />
+                  </g>
+
+                  {/* Slice 4 (y = 70): offset +16px */}
+                  <g className="transition-transform duration-500 ease-out translate-x-4 group-hover:translate-x-0">
+                    <rect x="65" y="70" width="110" height="7" rx="3.5" fill="#0A84FF" fillOpacity="0.22" stroke="#38BDF8" strokeWidth="1" strokeOpacity="0.55" className="group-hover:fill-opacity-30 group-hover:stroke-opacity-85 transition-all duration-300" />
+                    <line x1="178" y1="73.5" x2="184" y2="73.5" stroke="#38BDF8" strokeWidth="1" strokeOpacity="0.4" />
+                  </g>
+
+                  {/* Slice 5 (y = 86): offset -10px */}
+                  <g className="transition-transform duration-500 ease-out -translate-x-2.5 group-hover:translate-x-0">
+                    <rect x="65" y="86" width="110" height="7" rx="3.5" fill="#0A84FF" fillOpacity="0.16" stroke="#38BDF8" strokeWidth="1" strokeOpacity="0.45" className="group-hover:fill-opacity-25 group-hover:stroke-opacity-80 transition-all duration-300" />
+                    <line x1="56" y1="89.5" x2="62" y2="89.5" stroke="#38BDF8" strokeWidth="1" strokeOpacity="0.4" />
+                  </g>
+
+                  {/* Telemetry watermark */}
+                  <text x="120" y="113" textAnchor="middle" fill="#0A84FF" fillOpacity="0.65" fontSize="7.5" fontFamily="monospace" letterSpacing="0.08em">
+                    2D–3D SVR · 5.00mm CORRECTION
+                  </text>
+                </svg>
               </div>
-              <h3 className="text-2xl font-semibold text-[#F5F5F7] tracking-tight">
+
+              {/* Eyebrow badge */}
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#0A84FF]/10 border border-[#0A84FF]/20 text-[11px] font-mono tabular-nums text-[#0A84FF] mb-3">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#0A84FF]" />
+                <span>SVR · 5.00 mm Shift</span>
+              </div>
+
+              {/* Title & Description */}
+              <h3 className="text-xl sm:text-2xl font-semibold text-[#F5F5F7] tracking-tight mb-2">
                 5 mm Patient Motion
               </h3>
-              <p className="text-xs sm:text-sm leading-relaxed">
+              <p className="text-xs sm:text-sm leading-relaxed text-[#86868B]">
                 <span className="text-[#F5F5F7] font-medium">Inter-slice displacement. </span>
-                <span className="text-[#86868B]">Evaluates slice-to-volume registration recovery against intentional motion artifacts.</span>
+                Evaluates slice-to-volume registration recovery against intentional motion artifacts.
               </p>
             </div>
 
-            <div className="flex items-center gap-1.5 text-xs text-[#2997FF] group-hover:text-[#52aaff] transition-colors font-medium pt-2">
+            {/* Link */}
+            <div className="flex items-center gap-1.5 text-xs text-[#2997FF] group-hover:text-[#52aaff] transition-colors font-medium pt-3 border-t border-white/[0.04]">
               {loadingPresetSlug === 'synthetic_sphere_motion_5mm' ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-[#0071E3]" />
@@ -1320,22 +1493,30 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
                 </>
               ) : (
                 <>
-                  <span>Load benchmark study</span>
-                  <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                  <span>Run study</span>
+                  <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform duration-200" />
                 </>
               )}
             </div>
           </div>
         </div>
 
-        {/* Central Closing Action */}
-        <div className="mt-12 text-center">
+        {/* Streamlined Custom DICOM Closing Action */}
+        <div className="mt-14 sm:mt-16 pt-8 border-t border-white/[0.06] flex flex-col sm:flex-row items-center justify-between gap-4 max-w-3xl mx-auto px-4">
+          <div className="text-center sm:text-left space-y-0.5">
+            <div className="text-sm font-medium text-[#F5F5F7]">
+              Have your own CT or MRI series?
+            </div>
+            <div className="text-xs text-[#86868B]">
+              Drop raw DICOM files or zip archive for instant multi-slice reconstruction.
+            </div>
+          </div>
           <button
             onClick={onLaunchWorkspace}
-            className="bg-[#0071E3] hover:bg-[#0077ED] text-white text-sm font-medium px-8 py-3 rounded-full transition-all duration-200 shadow-sm inline-flex items-center gap-2"
+            className="group bg-[#0071E3] hover:bg-[#0077ED] active:scale-[0.98] text-white text-xs sm:text-sm font-medium px-5 py-2.5 rounded-full transition-all duration-200 shadow-[0_2px_12px_rgba(0,113,227,0.25)] hover:shadow-[0_4px_16px_rgba(0,113,227,0.4)] inline-flex items-center gap-2 shrink-0"
           >
-            <span>Launch 3D Workspace with Custom DICOM</span>
-            <ChevronRight className="w-4 h-4" />
+            <span>Upload Custom DICOM</span>
+            <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
           </button>
         </div>
       </section>
