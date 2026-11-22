@@ -91,18 +91,19 @@ const HeroShowcase3D: React.FC = () => {
     if (!container) return;
 
     let width = container.clientWidth || 800;
-    let height = container.clientHeight || 480;
+    let height = container.clientHeight || 520;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
 
-    const camera = new THREE.PerspectiveCamera(34, width / height, 0.1, 1000);
+    // Cinematic flatter FOV (28°) for hardware-grade product presentation
+    const camera = new THREE.PerspectiveCamera(28, width / height, 0.1, 1000);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.25;
+    renderer.toneMappingExposure = 1.3;
     // Enable local clipping planes for dynamic slice-to-solid transitions
     renderer.localClippingEnabled = true;
     container.appendChild(renderer.domElement);
@@ -117,34 +118,39 @@ const HeroShowcase3D: React.FC = () => {
     controls.maxPolarAngle = Math.PI / 1.75;
     controls.minPolarAngle = Math.PI / 2.75;
 
-    // Studio 3-point lighting + crisp cyan rim lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+    // Studio 3-point lighting + high-intensity cyan rim lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
     scene.add(ambientLight);
 
-    const keyLight = new THREE.DirectionalLight(0xffffff, 1.3);
-    keyLight.position.set(8, 12, 10);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.7);
+    keyLight.position.set(7, 13, 9);
     scene.add(keyLight);
 
-    const rimLight = new THREE.DirectionalLight(0x38bdf8, 3.2);
-    rimLight.position.set(-9, 6, -8);
+    const rimLight = new THREE.DirectionalLight(0x38bdf8, 4.0);
+    rimLight.position.set(-10, 6, -8);
     scene.add(rimLight);
 
-    const fillLight = new THREE.DirectionalLight(0x0a84ff, 0.6);
-    fillLight.position.set(3, -6, 5);
+    const fillLight = new THREE.DirectionalLight(0x0a84ff, 0.85);
+    fillLight.position.set(3, -5, 5);
     scene.add(fillLight);
 
-    const topAccent = new THREE.DirectionalLight(0x60a5fa, 0.8);
-    topAccent.position.set(0, 8, 2);
+    const topAccent = new THREE.DirectionalLight(0x60a5fa, 1.1);
+    topAccent.position.set(0, 9, 2);
     scene.add(topAccent);
+
+    const frontKicker = new THREE.DirectionalLight(0x38bdf8, 0.6);
+    frontKicker.position.set(0, 0, 8);
+    scene.add(frontKicker);
 
     const modelGroup = new THREE.Group();
     scene.add(modelGroup);
 
     // Dynamic clipping planes
     // Solid is retained below the scan plane: y <= scanY <=> (0, -1, 0) · p + scanY >= 0
-    const solidClipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
+    // Start at +0.16 (55% height) for an immediate 50/50 slice-to-solid split on frame 1
+    const solidClipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0.16);
     // Slices and point cloud retained above the scan plane: y >= scanY <=> (0, 1, 0) · p - scanY >= 0
-    const slicesClipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const slicesClipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.16);
 
     // ─── 1. Sculpted Smooth-Shaded Anatomical Solid (Lower Half) ───────
     // High-subdivision organic dual-lobe thoracic / visceral geometry
@@ -167,13 +173,17 @@ const HeroShowcase3D: React.FC = () => {
     solidGeo.computeVertexNormals();
 
     const solidMat = new THREE.MeshPhysicalMaterial({
-      color: 0x111827, // deep smoked obsidian / titanium
-      roughness: 0.22,
-      metalness: 0.15,
-      clearcoat: 0.85,
-      clearcoatRoughness: 0.15,
-      reflectivity: 0.8,
+      color: 0x0f172a, // rich dark slate / obsidian
+      roughness: 0.18,
+      metalness: 0.20,
+      clearcoat: 0.95,
+      clearcoatRoughness: 0.12,
+      reflectivity: 0.9,
       flatShading: false,
+      emissive: 0x061e38,
+      emissiveIntensity: 0.35,
+      sheen: 0.6,
+      sheenColor: new THREE.Color(0x38bdf8),
       clippingPlanes: [solidClipPlane],
       clipShadows: true,
     });
@@ -184,10 +194,10 @@ const HeroShowcase3D: React.FC = () => {
     const spineGroup = new THREE.Group();
     const vertGeo = new THREE.CylinderGeometry(0.17, 0.19, 0.13, 24);
     const vertMat = new THREE.MeshPhysicalMaterial({
-      color: 0x334155,
-      roughness: 0.28,
-      metalness: 0.12,
-      clearcoat: 0.6,
+      color: 0x475569,
+      roughness: 0.22,
+      metalness: 0.20,
+      clearcoat: 0.8,
       clippingPlanes: [solidClipPlane],
     });
     for (let v = 0; v < 9; v++) {
@@ -209,8 +219,8 @@ const HeroShowcase3D: React.FC = () => {
     const vesselGeo = new THREE.TubeGeometry(vesselCurve, 32, 0.05, 12, false);
     const vesselMat = new THREE.MeshStandardMaterial({
       color: 0x0284c7,
-      emissive: 0x0369a1,
-      emissiveIntensity: 0.5,
+      emissive: 0x38bdf8,
+      emissiveIntensity: 0.75,
       clippingPlanes: [solidClipPlane],
     });
     const vesselMesh = new THREE.Mesh(vesselGeo, vesselMat);
@@ -221,7 +231,7 @@ const HeroShowcase3D: React.FC = () => {
       color: 0x38bdf8,
       wireframe: true,
       transparent: true,
-      opacity: 0.08,
+      opacity: 0.10,
       clippingPlanes: [solidClipPlane],
     });
     const wireMesh = new THREE.Mesh(solidGeo, wireMat);
@@ -240,7 +250,7 @@ const HeroShowcase3D: React.FC = () => {
     const slicePlaneMat = new THREE.MeshBasicMaterial({
       color: 0x071e3d,
       transparent: true,
-      opacity: 0.14,
+      opacity: 0.18,
       depthWrite: false,
       side: THREE.DoubleSide,
       clippingPlanes: [slicesClipPlane],
@@ -250,7 +260,7 @@ const HeroShowcase3D: React.FC = () => {
     const sliceEdgeMat = new THREE.LineBasicMaterial({
       color: 0x38bdf8,
       transparent: true,
-      opacity: 0.25,
+      opacity: 0.40,
       clippingPlanes: [slicesClipPlane],
     });
 
@@ -289,7 +299,7 @@ const HeroShowcase3D: React.FC = () => {
       const contourMat = new THREE.LineBasicMaterial({
         color: 0x38bdf8,
         transparent: true,
-        opacity: 0.45,
+        opacity: 0.85,
         clippingPlanes: [slicesClipPlane],
       });
       const contourLine = new THREE.LineLoop(contourGeo, contourMat);
@@ -313,7 +323,7 @@ const HeroShowcase3D: React.FC = () => {
       const cornerMat = new THREE.LineBasicMaterial({
         color: 0x38bdf8,
         transparent: true,
-        opacity: 0.35,
+        opacity: 0.50,
         clippingPlanes: [slicesClipPlane],
       });
       sliceGroup.add(new THREE.LineSegments(cornerGeo, cornerMat));
@@ -334,9 +344,9 @@ const HeroShowcase3D: React.FC = () => {
     pointGeo.setAttribute('position', new THREE.BufferAttribute(pointPositions, 3));
     const pointMat = new THREE.PointsMaterial({
       color: 0x38bdf8,
-      size: 0.035,
+      size: 0.04,
       transparent: true,
-      opacity: 0.4,
+      opacity: 0.55,
       clippingPlanes: [slicesClipPlane],
     });
     const pointsMesh = new THREE.Points(pointGeo, pointMat);
@@ -349,7 +359,7 @@ const HeroShowcase3D: React.FC = () => {
     const scanPlaneMat = new THREE.MeshBasicMaterial({
       color: 0x38bdf8,
       transparent: true,
-      opacity: 0.22,
+      opacity: 0.26,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
@@ -359,28 +369,56 @@ const HeroShowcase3D: React.FC = () => {
     const scanEdgeMat = new THREE.LineBasicMaterial({
       color: 0x38bdf8,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.95,
     });
     scanPlaneMesh.add(new THREE.LineSegments(scanEdgeGeo, scanEdgeMat));
 
+    // Glowing laser intersection contour ring
+    const ringSegments = 48;
+    const ringPoints: THREE.Vector3[] = [];
+    for (let s = 0; s <= ringSegments; s++) {
+      const theta = (s / ringSegments) * Math.PI * 2;
+      const lobe = 1.0 + 0.22 * Math.cos(2.0 * theta) - 0.12 * Math.sin(theta);
+      const cleft = 1.0 - 0.14 * Math.exp(-4.5 * (theta - Math.PI / 2) * (theta - Math.PI / 2));
+      const factor = lobe * cleft * 0.95;
+      ringPoints.push(new THREE.Vector3(Math.cos(theta) * 1.4 * factor * 1.16, 0.005, Math.sin(theta) * 1.4 * factor * 0.96));
+    }
+    const ringGeo = new THREE.BufferGeometry().setFromPoints(ringPoints);
+    const ringMat = new THREE.LineBasicMaterial({
+      color: 0x67e8f9,
+      transparent: true,
+      opacity: 0.95,
+    });
+    scanPlaneMesh.add(new THREE.LineLoop(ringGeo, ringMat));
+
     // Cyan sweep point light
-    const scanLight = new THREE.PointLight(0x38bdf8, 2.2, 4.0);
+    const scanLight = new THREE.PointLight(0x38bdf8, 2.8, 4.5);
     scanPlaneMesh.add(scanLight);
+
+    // Initial position matching frame 1 start
+    scanPlaneMesh.position.y = 0.16;
 
     modelGroup.add(scanPlaneMesh);
 
-    // ─── Camera Framing with 30% Margin ────────────────────────────────
+    // ─── Camera Framing: Tight 70% Canvas Height Fill ──────────────────
     const fitCameraToBounds = () => {
-      const box = new THREE.Box3().setFromObject(modelGroup);
-      const sphere = box.getBoundingSphere(new THREE.Sphere());
+      // Direct physical height of the central anatomical assembly (3.3mm span)
+      const solidHeight = 3.3;
+      const solidWidth = 3.2;
       const fovRad = (camera.fov * Math.PI) / 360;
       const currentAspect = camera.aspect;
 
-      const vDist = (sphere.radius / Math.sin(fovRad)) * 1.32;
-      const hDist = (sphere.radius / (Math.sin(fovRad) * currentAspect)) * 1.32;
+      // Target ~70% vertical canvas fill for commanding presence
+      const targetVHeight = solidHeight / 0.70;
+      const vDist = targetVHeight / (2 * Math.tan(fovRad));
+
+      // Ensure clean horizontal margin on narrow mobile screens
+      const targetHWidth = solidWidth / 0.80;
+      const hDist = targetHWidth / (2 * Math.tan(fovRad) * currentAspect);
+
       const distance = Math.max(vDist, hDist);
 
-      camera.position.set(0, 0.15, distance);
+      camera.position.set(0, 0.08, distance);
       camera.lookAt(0, 0, 0);
       controls.target.set(0, 0, 0);
     };
@@ -397,7 +435,8 @@ const HeroShowcase3D: React.FC = () => {
       const currentMode = modeRef.current;
 
       if (currentMode === 'scan') {
-        const scanY = Math.sin(time * 1.05) * 1.35;
+        // Starts at ~55% height (+0.16) and oscillates smoothly between 22% (-0.80) and 82% (+1.04)
+        const scanY = 0.12 + Math.sin(time * 1.05 + 0.05) * 0.92;
         solidClipPlane.constant = scanY;
         slicesClipPlane.constant = -scanY;
         scanPlaneMesh.visible = true;
@@ -447,6 +486,8 @@ const HeroShowcase3D: React.FC = () => {
       slicePlaneMat.dispose();
       sliceEdgeGeo.dispose();
       sliceEdgeMat.dispose();
+      ringGeo.dispose();
+      ringMat.dispose();
       pointGeo.dispose();
       pointMat.dispose();
       scanPlaneGeo.dispose();
@@ -461,15 +502,21 @@ const HeroShowcase3D: React.FC = () => {
 
   return (
     <div className="relative w-full flex flex-col items-center">
-      {/* 3D Canvas Box with Studio Glow */}
-      <div className="relative w-full h-[380px] sm:h-[440px] lg:h-[480px] select-none flex items-center justify-center">
-        {/* Subtle ambient studio glow emerging organically from pure #000000 */}
+      {/* 3D Canvas Box with Focused Radial Studio Glow */}
+      <div className="relative w-full h-[460px] sm:h-[520px] lg:h-[560px] select-none flex items-center justify-center">
+        {/* Centered radial studio glow directly behind the 3D model */}
         <div className="absolute inset-0 -z-10 flex items-center justify-center pointer-events-none">
-          <div className="w-[480px] sm:w-[640px] h-[300px] sm:h-[380px] bg-gradient-to-tr from-[#0071E3]/20 via-[#38BDF8]/15 to-transparent rounded-full blur-3xl opacity-75" />
+          <div
+            className="w-[580px] sm:w-[780px] lg:w-[920px] h-[360px] sm:h-[460px] lg:h-[520px] rounded-full blur-3xl opacity-85"
+            style={{
+              background:
+                'radial-gradient(circle, rgba(10,132,255,0.18) 0%, rgba(56,189,248,0.10) 35%, rgba(0,0,0,0) 68%)',
+            }}
+          />
         </div>
 
         <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
-        <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black to-transparent pointer-events-none" />
+        <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black to-transparent pointer-events-none" />
       </div>
 
       {/* Interactive Apple Glass Mode Pill */}
@@ -596,11 +643,11 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
       {/* ─── 1. Cinematic Hero Section (#000000 canvas, above-the-fold) ── */}
       <section
         ref={heroReveal.ref}
-        className={`pt-10 sm:pt-14 pb-12 sm:pb-16 text-center transition-all duration-1000 ease-out ${
+        className={`pt-8 sm:pt-12 pb-10 sm:pb-14 text-center transition-all duration-1000 ease-out ${
           heroReveal.isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
         }`}
       >
-        <div className="max-w-4xl mx-auto px-6 space-y-4">
+        <div className="max-w-4xl mx-auto px-6 space-y-3.5">
           <span className="text-xs sm:text-sm font-semibold tracking-wider text-[#2997FF] uppercase">
             SliceM 3D
           </span>
@@ -632,7 +679,7 @@ export const LandingFrontage: React.FC<LandingFrontageProps> = ({
           </div>
         </div>
 
-        <div className="w-full mt-3">
+        <div className="w-full mt-1.5">
           <HeroShowcase3D />
         </div>
       </section>
