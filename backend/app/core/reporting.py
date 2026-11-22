@@ -201,19 +201,49 @@ def _render_orthogonal_composite(
         if p98 <= p1:
             p98 = p1 + 1.0
 
+    # Load color mapping from labels_meta.json or fallback to DEFAULT_STRUCTURE_COLORS
+    color_map: Dict[int, np.ndarray] = {}
+    meta_file = case_dir / "labels_meta.json"
+    if meta_file.is_file():
+        try:
+            with open(meta_file, "r", encoding="utf-8") as f:
+                meta_data = json.load(f)
+                for st in meta_data.get("structures", []):
+                    c_hex = str(st.get("color", "#38bdf8")).lstrip("#")
+                    if len(c_hex) == 6:
+                        rgb_tuple = (int(c_hex[0:2], 16), int(c_hex[2:4], 16), int(c_hex[4:6], 16))
+                        color_map[int(st["id"])] = np.array(rgb_tuple, dtype=np.float32)
+        except Exception:
+            pass
+
+    from app.core.segment import DEFAULT_STRUCTURE_COLORS
+
+    def get_color(uid: int) -> np.ndarray:
+        if uid in color_map:
+            return color_map[uid]
+        hex_c = DEFAULT_STRUCTURE_COLORS[(int(uid) - 1) % len(DEFAULT_STRUCTURE_COLORS)].lstrip("#")
+        return np.array((int(hex_c[0:2], 16), int(hex_c[2:4], 16), int(hex_c[4:6], 16)), dtype=np.float32)
+
     def make_panel(slice_2d: np.ndarray, mask_2d: Optional[np.ndarray]) -> Image.Image:
         norm = np.clip((slice_2d - p1) / (p98 - p1), 0.0, 1.0)
         gray = (norm * 255.0).astype(np.uint8)
         rgb = np.stack([gray, gray, gray], axis=-1)
 
         if mask_2d is not None and np.any(mask_2d > 0):
-            cyan = np.array([10, 132, 255], dtype=np.uint8)  # Apple System Blue
-            fg = mask_2d > 0
-            # Subtle semi-transparent 20% tint for interior so underlying bone trabeculae are visible
-            rgb[fg] = (0.80 * rgb[fg] + 0.20 * cyan).astype(np.uint8)
-            # Thin boundary contour outline (85% cyan)
-            boundary = fg & ~scipy.ndimage.binary_erosion(fg, iterations=1)
-            rgb[boundary] = (0.15 * rgb[boundary] + 0.85 * cyan).astype(np.uint8)
+            # Iterate through each unique non-zero label present in this 2D slice
+            unique_uids = [int(u) for u in np.unique(mask_2d) if u > 0]
+            for uid in unique_uids:
+                color_np = get_color(uid)
+                fg = mask_2d == uid
+                if not np.any(fg):
+                    continue
+
+                # 25% translucent fill for interior so underlying anatomy remains visible
+                rgb[fg] = np.clip(0.75 * rgb[fg] + 0.25 * color_np, 0.0, 255.0).astype(np.uint8)
+
+                # Thin boundary contour outline (85% structure color)
+                boundary = fg & ~scipy.ndimage.binary_erosion(fg, iterations=1)
+                rgb[boundary] = np.clip(0.15 * rgb[boundary] + 0.85 * color_np, 0.0, 255.0).astype(np.uint8)
 
         img = Image.fromarray(rgb)
         img = img.resize((panel_width, panel_height), Image.Resampling.BILINEAR)
@@ -585,7 +615,12 @@ def generate_case_pdf(case_dir: Path) -> bytes:
         pdf.cell(CONTENT_WIDTH, 6.0, "No segmented structures recorded for this case.", border="B", align="C", fill=True)
         curr_y += 7.0
     else:
-        for idx, st in enumerate(report.structures[:6]):
+        # Sort structures by volume descending so clinically prominent organs appear first
+        sorted_structures = sorted(report.structures, key=lambda st: st.volume_mm3, reverse=True)
+        visible_structures = sorted_structures[:8]
+        overflow_count = len(sorted_structures) - len(visible_structures)
+
+        for idx, st in enumerate(visible_structures):
             pdf.set_draw_color(*C_BORDER)
             pdf.set_xy(MARGIN, curr_y)
 
@@ -597,13 +632,13 @@ def generate_case_pdf(case_dir: Path) -> bytes:
 
             pdf.set_font("Helvetica", "B", 6.8)
             pdf.set_text_color(*C_TEXT)
-            pdf.cell(42.0, 5.0, f" {_humanize_structure_name(st.name)}", border="B", align="L")
+            pdf.cell(42.0, 4.8, f" {_humanize_structure_name(st.name)}", border="B", align="L")
 
             pdf.set_font("Helvetica", "", 6.8)
-            pdf.cell(24.0, 5.0, f"{vol_cm3:,.2f} ", border="B", align="R")
-            pdf.cell(28.0, 5.0, f"{st.surface_area_mm2:,.0f} ", border="B", align="R")
-            pdf.cell(26.0, 5.0, f"{thk_str} ", border="B", align="R")
-            pdf.cell(26.0, 5.0, f"{hu_str} ", border="B", align="R")
+            pdf.cell(24.0, 4.8, f"{vol_cm3:,.2f} ", border="B", align="R")
+            pdf.cell(28.0, 4.8, f"{st.surface_area_mm2:,.0f} ", border="B", align="R")
+            pdf.cell(26.0, 4.8, f"{thk_str} ", border="B", align="R")
+            pdf.cell(26.0, 4.8, f"{hu_str} ", border="B", align="R")
 
             # Watertight badge
             if st.watertight:
@@ -611,16 +646,30 @@ def generate_case_pdf(case_dir: Path) -> bytes:
             else:
                 pdf.set_text_color(185, 119, 14)
             pdf.set_font("Helvetica", "B", 6.8)
-            pdf.cell(18.0, 5.0, wt_str, border="B", align="C")
+            pdf.cell(18.0, 4.8, wt_str, border="B", align="C")
 
             # Manifold badge
             if st.manifold:
                 pdf.set_text_color(29, 131, 72)
             else:
                 pdf.set_text_color(185, 119, 14)
-            pdf.cell(18.0, 5.0, man_str, border="B", align="C")
+            pdf.cell(18.0, 4.8, man_str, border="B", align="C")
 
-            curr_y += 5.0
+            curr_y += 4.8
+
+        if overflow_count > 0:
+            pdf.set_draw_color(*C_BORDER)
+            pdf.set_xy(MARGIN, curr_y)
+            pdf.set_text_color(*C_MUTED)
+            pdf.set_font("Helvetica", "I", 6.5)
+            pdf.cell(
+                CONTENT_WIDTH,
+                4.2,
+                f"+ {overflow_count} additional structures exported in JSON / ZIP bundle",
+                border="B",
+                align="C",
+            )
+            curr_y += 4.8
 
     # ─────────────────────────────────────────────────────────────────────────
     # 6. Pinned Footer (Pipeline Timings & Regulatory Disclaimer)
@@ -661,4 +710,10 @@ def generate_case_pdf(case_dir: Path) -> bytes:
     )
     pdf.multi_cell(CONTENT_WIDTH - 4.0, 2.8, disclaimer_text, align="C")
 
-    return bytes(pdf.output())
+    pdf_bytes = bytes(pdf.output())
+    try:
+        (case_dir / "report.pdf").write_bytes(pdf_bytes)
+    except Exception as e:
+        logger.warning("Could not persist report.pdf to case directory: %s", e)
+
+    return pdf_bytes

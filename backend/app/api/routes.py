@@ -777,6 +777,12 @@ def generate_meshes(
             include_marching_cubes_baseline=req.include_marching_cubes_baseline,
         )
         report = compute_structure_analytics(case_dir, mesh_results)
+        try:
+            from app.core.reporting import generate_case_pdf
+
+            generate_case_pdf(case_dir)
+        except Exception as pdf_err:
+            logger.warning("Could not auto-regenerate PDF report after meshing: %s", pdf_err)
         return report
     except Exception as exc:
         raise HTTPException(
@@ -961,6 +967,9 @@ def get_case_pdf_report(case_id: str) -> Response:
             media_type="application/pdf",
             headers={
                 "Content-Disposition": f'attachment; filename="{case_id}_report.pdf"',
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
             },
         )
     except FileNotFoundError as exc:

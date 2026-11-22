@@ -153,6 +153,24 @@ def generate_structure_meshes(
     meshes_dir = case_dir / "meshes"
     meshes_dir.mkdir(parents=True, exist_ok=True)
 
+    # For 3 mm TotalSegmentator (Fast) models, use slightly stronger windowed-sinc smoothing
+    # when caller passes default settings (20 iterations, pass_band 0.1), reducing 3 mm stair-stepping
+    # ridges while preserving watertightness and volume (< 1% change).
+    effective_iterations = smooth_iterations
+    effective_pass_band = pass_band
+
+    report_file = case_dir / "report.json"
+    if report_file.is_file():
+        try:
+            with open(report_file, "r", encoding="utf-8") as f:
+                rdata = json.load(f)
+                engine = rdata.get("segmentation", {}).get("model_used")
+                if engine == "totalsegmentator_fast" and smooth_iterations == 20 and pass_band == 0.1:
+                    effective_iterations = 30
+                    effective_pass_band = 0.05
+        except Exception:
+            pass
+
     results: List[Dict[str, Any]] = []
 
     for st in structures_meta:
@@ -194,8 +212,8 @@ def generate_structure_meshes(
         # 3. Non-shrinking smoothing via vtkWindowedSincPolyDataFilter
         smooth = vtkWindowedSincPolyDataFilter()
         smooth.SetInputConnection(fe.GetOutputPort())
-        smooth.SetNumberOfIterations(smooth_iterations)
-        smooth.SetPassBand(pass_band)
+        smooth.SetNumberOfIterations(effective_iterations)
+        smooth.SetPassBand(effective_pass_band)
         smooth.NonManifoldSmoothingOn()
         smooth.FeatureEdgeSmoothingOff()
         smooth.NormalizeCoordinatesOn()

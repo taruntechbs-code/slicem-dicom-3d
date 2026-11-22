@@ -70,5 +70,124 @@ def test_presets_and_pdf_report_end_to_end(client, monkeypatch):
         res_pdf = client.get("/api/cases/PRESET-tilted-12deg/report/pdf")
         assert res_pdf.status_code == 200
         assert res_pdf.headers["content-type"] == "application/pdf"
+        assert "no-store" in res_pdf.headers.get("cache-control", "")
         assert res_pdf.content.startswith(b"%PDF")
         assert len(res_pdf.content) > 2000
+
+
+def test_pdf_structure_sorting_and_overflow(monkeypatch):
+    """Test that PDF report sorts structures by volume descending and displays overflow note when > 8 structures."""
+    import re
+    import zlib
+    from app.core.reporting import generate_case_pdf
+    from app.models.schemas import (
+        CaseReport,
+        GeometryReport,
+        MotionReport,
+        ScanReport,
+        SegmentationReport,
+        StructureReport,
+    )
+
+    with tempfile.TemporaryDirectory() as temp_ws:
+        case_dir = Path(temp_ws) / "TEST-OVERFLOW"
+        case_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create 12 dummy structures with varying volumes
+        structures = []
+        for i in range(1, 13):
+            structures.append(
+                StructureReport(
+                    id=i,
+                    name=f"Organ_{i:02d}",
+                    volume_mm3=float(i * 1000.0),  # Organ_12 has 12,000, Organ_01 has 1,000
+                    surface_area_mm2=500.0,
+                    mean_thickness_mm=3.0,
+                    intensity_mean=40.0,
+                    intensity_std=5.0,
+                    watertight=True,
+                    manifold=True,
+                    vertex_count=100,
+                    face_count=200,
+                    topology_components=1,
+                    mesh_files={"stl": f"meshes/organ_{i:02d}.stl"},
+                )
+            )
+
+        report = CaseReport(
+            case_id="TEST-OVERFLOW",
+            created_at="2026-11-22T10:00:00Z",
+            status="pass",
+            scan=ScanReport(
+                modality="CT",
+                slice_count=50,
+                rows=512,
+                cols=512,
+                pixel_spacing_mm=[1.0, 1.0],
+                declared_thickness_mm=1.0,
+            ),
+            geometry=GeometryReport(
+                status="PASS",
+                slices_reordered=False,
+                measured_spacing_mm=1.0,
+                spacing_mismatch_mm=0.0,
+                missing_slice_indices=[],
+                gantry_tilt_deg=0.0,
+                isotropic_spacing_mm=1.0,
+                warnings=[],
+            ),
+            motion=MotionReport(
+                status="PASS",
+                applied=False,
+                flagged=False,
+                per_slice_initial_shift_mm=[],
+                per_slice_residual_shift_mm=[],
+                max_residual_shift_mm=0.0,
+            ),
+            segmentation=SegmentationReport(
+                status="PASS",
+                model_used="totalsegmentator_fast",
+                runtime_sec=4.2,
+                peak_vram_mb=0.0,
+                warnings=[],
+            ),
+            structures=structures,
+            stage_timings_sec={
+                "scan_and_geometry": 0.5,
+                "motion": 0.2,
+                "segmentation": 4.2,
+                "mesh_and_analytics": 1.1,
+            },
+        )
+
+        with open(case_dir / "report.json", "w", encoding="utf-8") as f:
+            f.write(report.model_dump_json(indent=2))
+
+        pdf_bytes = generate_case_pdf(case_dir)
+        assert pdf_bytes.startswith(b"%PDF")
+        assert (case_dir / "report.pdf").is_file()
+        assert (case_dir / "report.pdf").stat().st_size == len(pdf_bytes)
+
+        # Decompress PDF streams to inspect text content
+        decompressed_chunks = []
+        for match in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", pdf_bytes, re.DOTALL):
+            stream_data = match.group(1)
+            try:
+                decompressed_chunks.append(zlib.decompress(stream_data).decode("latin1", errors="ignore"))
+            except Exception:
+                pass
+        full_pdf_text = " ".join(decompressed_chunks)
+
+        # Verify overflow row text exists: 12 structures -> top 8 shown, overflow is 4
+        assert "+ 4 additional structures exported in JSON / ZIP bundle" in full_pdf_text
+
+        # Verify that largest structures (Organ_12, Organ_11) appear before smaller ones (Organ_05)
+        pos_12 = full_pdf_text.find("Organ 12")
+        pos_05 = full_pdf_text.find("Organ 05")
+        assert pos_12 != -1
+        assert pos_05 != -1
+        assert pos_12 < pos_05
+
+        # Verify smallest structures (Organ_04, Organ_03, Organ_02, Organ_01) were excluded from top 8
+        assert "Organ 04" not in full_pdf_text
+        assert "Organ 01" not in full_pdf_text
