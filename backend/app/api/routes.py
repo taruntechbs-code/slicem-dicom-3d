@@ -3,6 +3,7 @@
 from datetime import datetime
 import io
 import json
+import logging
 from pathlib import Path
 import re
 import shutil
@@ -25,6 +26,8 @@ from app.core.motion import correct_slice_motion, inject_slice_motion
 from app.core.phantoms import generate_sphere_phantom
 from app.core.segment import DEFAULT_STRUCTURE_COLORS, run_segmentation
 from app.models.schemas import CaseReport, HealthResponse
+
+logger = logging.getLogger("slicem.api")
 
 router = APIRouter(tags=["cases"])
 
@@ -496,6 +499,7 @@ def _run_segment_task(
         run_segmentation(case_dir, engine=engine, roi_subset=roi_subset, job_callback=callback)
         _update_segment_job(case_dir, "completed", 100, "Segmentation completed successfully.")
     except Exception as exc:
+        logger.exception("Segmentation task failed for %s: %s", case_dir.name, exc)
         _update_segment_job(case_dir, "failed", 100, f"Segmentation error: {exc}", error=str(exc))
 
 

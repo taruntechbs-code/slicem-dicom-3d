@@ -391,3 +391,207 @@ def test_ct_bone_threshold_and_boundary_capping(tmp_path: Path):
     assert (case_dir / "meshes" / "skull_bone.stl").is_file()
     assert (case_dir / "meshes" / "skull_bone.glb").is_file()
 
+
+def test_totalsegmentator_isolated_subprocess_invocation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test TotalSegmentator execution in an isolated macOS-safe subprocess.
+
+    Verifies:
+      - CLI binary resolution or fallback
+      - Safe args: -i, -o, --ml, -ta, --device cpu (on Darwin), --nr_thr_resamp 1, --nr_thr_saving 1, --fast, -rs
+      - Safe env vars: OBJC_DISABLE_INITIALIZE_FORK_SAFETY, KMP_DUPLICATE_LIB_OK, OMP_NUM_THREADS, MKL_NUM_THREADS
+      - Clean parsing of --ml output and mapping to official organ names (e.g. liver, spleen).
+    """
+    case_dir = tmp_path / "case_totalseg"
+    case_dir.mkdir(parents=True, exist_ok=True)
+
+    vol_path = case_dir / "volume_iso.nii.gz"
+    vol_arr = np.full((12, 32, 32), -1000.0, dtype=np.float32)
+    vol_img = sitk.GetImageFromArray(vol_arr)
+    vol_img.SetSpacing((1.0, 1.0, 1.0))
+    sitk.WriteImage(vol_img, str(vol_path))
+
+    # Create dummy report.json
+    from app.models.schemas import CaseReport, GeometryReport, MotionReport, ScanReport, SegmentationReport
+    report = CaseReport(
+        case_id="TEST-TOTALSEG",
+        created_at="2026-11-22T00:00:00Z",
+        status="pass",
+        scan=ScanReport(
+            modality="CT",
+            slice_count=12,
+            rows=32,
+            cols=32,
+            pixel_spacing_mm=[1.0, 1.0],
+            declared_thickness_mm=1.0,
+        ),
+        geometry=GeometryReport(
+            status="PASS",
+            slices_reordered=False,
+            measured_spacing_mm=1.0,
+            spacing_mismatch_mm=0.0,
+            missing_slice_indices=[],
+            gantry_tilt_deg=0.0,
+            isotropic_spacing_mm=1.0,
+            warnings=[],
+        ),
+        motion=MotionReport(
+            status="PASS",
+            applied=False,
+            per_slice_initial_shift_mm=[],
+            per_slice_residual_shift_mm=[],
+            max_residual_shift_mm=0.0,
+            flagged=False,
+        ),
+        segmentation=SegmentationReport(
+            status="PENDING",
+            model_used=None,
+            runtime_sec=None,
+            peak_vram_mb=None,
+            warnings=[],
+        ),
+        structures=[],
+        stage_timings_sec={},
+    )
+    (case_dir / "report.json").write_text(report.model_dump_json(indent=2))
+
+    intercepted_cmd = []
+    intercepted_env = {}
+
+    def mock_subprocess_run(cmd, capture_output=True, text=True, env=None):
+        intercepted_cmd.extend(cmd)
+        if env:
+            intercepted_env.update(env)
+
+        # Write fake multi-label NIfTI output at -o argument location
+        out_idx = cmd.index("-o") + 1
+        out_path = Path(cmd[out_idx])
+        lbl_arr = np.zeros((12, 32, 32), dtype=np.uint16)
+        # Class 1: spleen, Class 5: liver
+        lbl_arr[2:6, 4:12, 4:12] = 1
+        lbl_arr[6:10, 16:24, 16:24] = 5
+        fake_lbl_img = sitk.GetImageFromArray(lbl_arr)
+        fake_lbl_img.SetSpacing((1.0, 1.0, 1.0))
+        sitk.WriteImage(fake_lbl_img, str(out_path))
+
+        import subprocess
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="Success", stderr="")
+
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+    # Run segmentation with totalsegmentator_fast and roi_subset
+    res_report = run_segmentation(
+        case_dir,
+        engine="totalsegmentator_fast",
+        roi_subset=["liver", "spleen"],
+    )
+
+    # 1. Assert command arguments
+    assert "--ml" in intercepted_cmd
+    assert "-i" in intercepted_cmd
+    assert "-o" in intercepted_cmd
+    assert "--fast" in intercepted_cmd
+    assert "--nr_thr_resamp" in intercepted_cmd
+    assert "1" in intercepted_cmd
+    assert "--nr_thr_saving" in intercepted_cmd
+    assert "-rs" in intercepted_cmd
+    assert "liver" in intercepted_cmd
+    assert "spleen" in intercepted_cmd
+
+    # 2. Assert macOS fork safety & threading environment variables
+    assert intercepted_env.get("OBJC_DISABLE_INITIALIZE_FORK_SAFETY") == "YES"
+    assert intercepted_env.get("KMP_DUPLICATE_LIB_OK") == "TRUE"
+    assert intercepted_env.get("OMP_NUM_THREADS") == "4"
+    assert intercepted_env.get("MKL_NUM_THREADS") == "4"
+    assert intercepted_env.get("PYTORCH_ENABLE_MPS_FALLBACK") == "1"
+    assert intercepted_env.get("TOTALSEG_DISABLE_STATS") == "1"
+
+    # 3. Assert recovered structure names from class_map
+    struct_names = {st.name for st in res_report.structures}
+    assert "liver" in struct_names
+    assert "spleen" in struct_names
+    assert res_report.segmentation.status == "PASS"
+    assert (case_dir / "labels.nii.gz").is_file()
+    assert (case_dir / "labels_meta.json").is_file()
+
+
+def test_totalsegmentator_subprocess_failure_handling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test that subprocess failure raises readable RuntimeError and transitions job to failed."""
+    case_dir = tmp_path / "case_totalseg_fail"
+    case_dir.mkdir(parents=True, exist_ok=True)
+
+    vol_path = case_dir / "volume_iso.nii.gz"
+    vol_img = sitk.GetImageFromArray(np.zeros((8, 16, 16), dtype=np.float32))
+    sitk.WriteImage(vol_img, str(vol_path))
+
+    from app.models.schemas import CaseReport, GeometryReport, MotionReport, ScanReport, SegmentationReport
+    report = CaseReport(
+        case_id="TEST-FAIL",
+        created_at="2026-11-22T00:00:00Z",
+        status="pass",
+        scan=ScanReport(
+            modality="CT",
+            slice_count=8,
+            rows=16,
+            cols=16,
+            pixel_spacing_mm=[1.0, 1.0],
+            declared_thickness_mm=1.0,
+        ),
+        geometry=GeometryReport(
+            status="PASS",
+            slices_reordered=False,
+            measured_spacing_mm=1.0,
+            spacing_mismatch_mm=0.0,
+            missing_slice_indices=[],
+            gantry_tilt_deg=0.0,
+            isotropic_spacing_mm=1.0,
+            warnings=[],
+        ),
+        motion=MotionReport(
+            status="PASS",
+            applied=False,
+            per_slice_initial_shift_mm=[],
+            per_slice_residual_shift_mm=[],
+            max_residual_shift_mm=0.0,
+            flagged=False,
+        ),
+        segmentation=SegmentationReport(
+            status="PENDING",
+            model_used=None,
+            runtime_sec=None,
+            peak_vram_mb=None,
+            warnings=[],
+        ),
+        structures=[],
+        stage_timings_sec={},
+    )
+    (case_dir / "report.json").write_text(report.model_dump_json(indent=2))
+
+    def mock_failing_subprocess_run(cmd, capture_output=True, text=True, env=None):
+        import subprocess
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=1,
+            stdout="",
+            stderr="Traceback (most recent call last):\nRuntimeError: Simulated MPS / OOM out of memory crash on macOS\n",
+        )
+
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", mock_failing_subprocess_run)
+
+    # 1. Verify direct RuntimeError
+    with pytest.raises(RuntimeError) as exc_info:
+        run_segmentation(case_dir, engine="totalsegmentator_fast")
+
+    assert "Simulated MPS / OOM out of memory crash on macOS" in str(exc_info.value)
+    assert "code 1" in str(exc_info.value)
+
+    # 2. Verify async background worker updates segment_job.json to failed
+    from app.api.routes import _run_segment_task, _get_segment_job
+    _run_segment_task(case_dir, engine="totalsegmentator_fast", roi_subset=None)
+
+    job_status = _get_segment_job(case_dir)
+    assert job_status["status"] == "failed"
+    assert "Simulated MPS / OOM out of memory crash" in (job_status["error"] or "")
+
+

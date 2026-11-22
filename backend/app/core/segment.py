@@ -14,15 +14,21 @@ Topology Cleanup:
 """
 
 import json
+import logging
 import os
-import time
 from pathlib import Path
+import platform
+import subprocess
+import sys
+import time
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 import SimpleITK as sitk
 
 from app.models.schemas import CaseReport, StageStatus, StructureReport
+
+logger = logging.getLogger("slicem.segment")
 
 EngineType = Literal[
     "phantom_threshold",
@@ -201,50 +207,132 @@ def _segment_totalsegmentator(
     modality: str,
     fast: bool,
     roi_subset: Optional[List[str]] = None,
+    job_callback: Optional[Callable[[int, str], None]] = None,
 ) -> Tuple[sitk.Image, Dict[int, str]]:
-    """Lazy-load and execute TotalSegmentator inference."""
+    """Execute TotalSegmentator in an isolated subprocess with macOS-safe multiprocessing/device settings.
+
+    Running in an isolated subprocess avoids Apple Silicon MPS 3D operator crashes and
+    multiprocessing fork memory corruption inside FastAPI.
+    """
+    # 1. Determine CLI binary or module fallback
+    cli_path = Path(sys.executable).parent / "TotalSegmentator"
+    if cli_path.is_file() and os.access(cli_path, os.X_OK):
+        cmd = [str(cli_path)]
+    else:
+        cmd = [sys.executable, "-m", "totalsegmentator.bin.TotalSegmentator"]
+
+    # 2. Output multi-label nifti path
+    case_dir = volume_path.parent
+    out_ml_path = case_dir / "totalseg_multilabel.nii.gz"
+    if out_ml_path.is_file():
+        try:
+            out_ml_path.unlink()
+        except Exception:
+            pass
+
+    # 3. Determine device
+    # Apple Silicon MPS 3D ops + nnUNetv2 workers crash in-process on macOS (SIGSEGV/SIGABRT).
+    # On Darwin (macOS), strictly use cpu. On Linux/Windows with CUDA, use gpu.
+    cuda_available = False
     try:
-        from totalsegmentator.python_api import totalsegmentator
-    except ImportError as exc:
-        raise RuntimeError(
-            "TotalSegmentator is not installed in the environment. "
-            "Please install TotalSegmentator or use engine='phantom_threshold'."
-        ) from exc
+        import torch
+        cuda_available = torch.cuda.is_available()
+    except Exception:
+        pass
 
-    import torch
-
-    if torch.cuda.is_available():
-        device = "cuda"
-    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        device = "mps"
+    if cuda_available and platform.system() != "Darwin":
+        device = "gpu"
     else:
         device = "cpu"
 
     task = "total_mr" if modality == "MRI" else "total"
 
-    # totalsegmentator returns a nibabel Nifti1Image when output_type is 'nib'
-    seg_nib = totalsegmentator(
-        input=str(volume_path),
-        task=task,
-        fast=fast,
-        roi_subset=roi_subset,
-        device=device,
-        output_type="nib",
+    cmd.extend([
+        "-i", str(volume_path),
+        "-o", str(out_ml_path),
+        "--ml",
+        "-ta", task,
+        "--device", device,
+        "--nr_thr_resamp", "1",
+        "--nr_thr_saving", "1",
+    ])
+
+    if fast:
+        cmd.append("--fast")
+
+    if roi_subset and len(roi_subset) > 0:
+        cmd.append("-rs")
+        cmd.extend(roi_subset)
+
+    # 4. macOS-safe environment dict inheriting os.environ
+    env = os.environ.copy()
+    env["OBJC_DISABLE_INITIALIZE_FORK_SAFETY"] = "YES"
+    env["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+    env["OMP_NUM_THREADS"] = "4"
+    env["MKL_NUM_THREADS"] = "4"
+    env["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+    env["TOTALSEG_DISABLE_STATS"] = "1"
+
+    if job_callback:
+        job_callback(35, f"Running TotalSegmentator subprocess ({'fast' if fast else 'full'}, device={device})...")
+
+    logger.info("Executing TotalSegmentator subprocess: %s", " ".join(cmd))
+
+    # 5. Run subprocess and capture output
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        env=env,
     )
 
-    import nibabel as nib
+    if proc.returncode != 0:
+        raw_err = proc.stderr or proc.stdout or ""
+        err_lines = [line.strip() for line in raw_err.splitlines() if line.strip()]
+        last_lines = "\n".join(err_lines[-10:]) if err_lines else f"Process exited with code {proc.returncode}"
+        logger.error("TotalSegmentator failed (code %d):\n%s", proc.returncode, last_lines)
+        raise RuntimeError(
+            f"TotalSegmentator failed (code {proc.returncode}):\n{last_lines}"
+        )
 
-    seg_arr = np.asanyarray(seg_nib.dataobj, dtype=np.uint16)
-    # SimpleITK expects (Z, Y, X)
-    seg_arr_sitk = np.transpose(seg_arr, (2, 1, 0))
+    if not out_ml_path.is_file():
+        raise FileNotFoundError(
+            f"TotalSegmentator finished with code 0, but output file '{out_ml_path}' was not generated."
+        )
 
-    label_img = sitk.GetImageFromArray(seg_arr_sitk)
+    # 6. Read generated multi-label NIfTI image
+    label_img = sitk.ReadImage(str(out_ml_path))
 
+    # Match reference image physical metadata
     ref_img = sitk.ReadImage(str(volume_path))
-    label_img.CopyInformation(ref_img)
+    if label_img.GetSize() != ref_img.GetSize():
+        from app.core.geometry import resample_label_to_reference
+        label_img = resample_label_to_reference(label_img, ref_img)
+    else:
+        label_img.CopyInformation(ref_img)
 
-    unique_ids = [int(x) for x in np.unique(seg_arr_sitk) if x > 0]
-    label_names = {uid: f"structure_{uid}" for uid in unique_ids}
+    # 7. Map unique label IDs to official anatomical structure names
+    seg_arr = sitk.GetArrayViewFromImage(label_img)
+    unique_ids = [int(x) for x in np.unique(seg_arr) if x > 0]
+
+    try:
+        from totalsegmentator.map_to_binary import class_map
+        task_map = class_map.get(task, class_map.get("total", {}))
+    except Exception:
+        task_map = {}
+
+    label_names: Dict[int, str] = {}
+    for uid in unique_ids:
+        label_names[uid] = task_map.get(uid, f"structure_{uid}")
+
+    if roi_subset and len(roi_subset) > 0:
+        subset_set = set(roi_subset)
+        label_names = {uid: name for uid, name in label_names.items() if name in subset_set}
+
+    try:
+        out_ml_path.unlink()
+    except Exception:
+        pass
 
     return label_img, label_names
 
@@ -338,6 +426,7 @@ def run_segmentation(
             modality=report.scan.modality,
             fast=fast_mode,
             roi_subset=roi_subset,
+            job_callback=job_callback,
         )
         volume_img = sitk.ReadImage(str(vol_path))
     elif engine == "nnunet_custom":
