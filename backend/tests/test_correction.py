@@ -4,6 +4,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 import numpy as np
+import pydicom
+from pydicom.dataset import FileDataset, FileMetaDataset
+from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, generate_uid
 import SimpleITK as sitk
 
 from app.core.geometry import analyze_dicom_series, correct_volume_geometry
@@ -211,3 +214,118 @@ def test_api_correction_and_orthogonal_slices(tmp_path: Path, monkeypatch: pytes
     assert "X-Slice-Count" in head_res.headers
     assert int(head_res.headers["X-Slice-Count"]) >= 60
     assert "x-slice-count" in head_res.headers.get("access-control-expose-headers", "").lower()
+
+
+def test_gantry_tilt_deskew_sign_regression(tmp_path: Path):
+    """Direct sign-verification regression test:
+    Creates a synthetic vertical rod/cylinder at fixed physical (X=0, Y=0)
+    imaged with a 15-degree gantry tilt (IPP_k shifting in +Y as Z increases,
+    so the rod's pixel row shifts in -row as Z increases per standard DICOM).
+    Runs analyze_dicom_series then correct_volume_geometry(isotropic_spacing_mm=1.0).
+    Verifies that after deskewing, the rod's centroid (row, col) remains constant
+    (drift < 1.0 mm) across Z—this strictly fails if the deskew shift sign is inverted.
+    """
+    raw_dir = tmp_path / "raw_rod"
+    case_dir = tmp_path / "case_rod"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    S, R, C = 40, 128, 128
+    sz, sy, sx = 2.0, 1.0, 1.0
+    tilt_deg = 15.0
+    tan_tilt = float(np.tan(np.radians(tilt_deg)))
+    radius_mm = 6.0
+
+    study_uid = generate_uid()
+    series_uid = generate_uid()
+
+    for k in range(S):
+        zk = k * sz
+        # IPP shifts in +Y as Z increases
+        yk = -(R / 2.0) * sy + zk * tan_tilt
+        xk = -(C / 2.0) * sx
+        ipp = [float(xk), float(yk), float(zk)]
+        iop = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+
+        # Per DICOM equation: P = IPP + col*sx*r_vec + row*sy*c_vec
+        # For a vertical cylinder at physical (X=0, Y=0):
+        # 0 = xk + col*sx => col = -xk/sx = 64.0
+        # 0 = yk + row*sy => row = -yk/sy = 64.0 - zk*tan_tilt/sy (shifts in -row)
+        col_c = -xk / sx
+        row_c = -yk / sy
+
+        yy, xx = np.ogrid[:R, :C]
+        mask = (xx - col_c) ** 2 + (yy - row_c) ** 2 <= radius_mm**2
+        # Rescale: HU = pixel * 1.0 - 1024 => 400 HU is 1424, -1000 HU is 24
+        pixel_array = np.where(mask, 1424, 24).astype(np.uint16)
+
+        fpath = raw_dir / f"slice_{k:03d}.dcm"
+        file_meta = FileMetaDataset()
+        file_meta.MediaStorageSOPClassUID = CTImageStorage
+        file_meta.MediaStorageSOPInstanceUID = generate_uid()
+        file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+        ds = FileDataset(str(fpath), {}, file_meta=file_meta, preamble=b"\0" * 128)
+        ds.PatientName = "ROD^REGRESSION"
+        ds.PatientID = "ROD-REG-001"
+        ds.Modality = "CT"
+        ds.SeriesInstanceUID = series_uid
+        ds.StudyInstanceUID = study_uid
+        ds.SOPInstanceUID = file_meta.MediaStorageSOPInstanceUID
+        ds.SOPClassUID = CTImageStorage
+        ds.InstanceNumber = k + 1
+        ds.Rows = R
+        ds.Columns = C
+        ds.BitsAllocated = 16
+        ds.BitsStored = 16
+        ds.HighBit = 15
+        ds.PixelRepresentation = 0
+        ds.SamplesPerPixel = 1
+        ds.PhotometricInterpretation = "MONOCHROME2"
+        ds.PixelSpacing = [f"{sy:.6f}", f"{sx:.6f}"]
+        ds.SliceThickness = f"{sz:.6f}"
+        ds.ImagePositionPatient = [f"{c:.6f}" for c in ipp]
+        ds.ImageOrientationPatient = [f"{c:.6f}" for c in iop]
+        ds.GantryDetectorTilt = f"{tilt_deg:.2f}"
+        ds.RescaleIntercept = "-1024.0"
+        ds.RescaleSlope = "1.0"
+        ds.RescaleType = "HU"
+        ds.PixelData = pixel_array.tobytes()
+        ds.save_as(str(fpath), enforce_file_format=True)
+
+    # 1. Analyze series and verify tilt detection
+    report = analyze_dicom_series(raw_dir, case_dir, "CASE-ROD-REG")
+    assert report.geometry.gantry_tilt_deg == pytest.approx(tilt_deg, abs=0.5)
+
+    # 2. Check raw volume row drift (should exceed 15 mm)
+    raw_vol = np.load(case_dir / "volume_raw.npy")
+    raw_rows = []
+    for k in range(S):
+        sl = raw_vol[k]
+        ys, _ = np.where(sl > 0)
+        raw_rows.append(np.mean(ys) * sy)
+    raw_drift = max(raw_rows) - min(raw_rows)
+    assert raw_drift > 15.0, f"Raw row drift should exceed 15 mm, got {raw_drift:.2f} mm"
+
+    # 3. Correct volume geometry
+    iso_img, meta = correct_volume_geometry(case_dir, isotropic_spacing_mm=1.0)
+    assert meta["deskew_applied"] is True
+
+    # 4. Measure corrected row and column drift across Z
+    corr_vol = sitk.GetArrayViewFromImage(iso_img)
+    corr_rows = []
+    corr_cols = []
+    for z in range(corr_vol.shape[0]):
+        sl = corr_vol[z]
+        ys, xs = np.where(sl > 0)
+        if len(ys) > 10:
+            corr_rows.append(np.mean(ys) * 1.0)
+            corr_cols.append(np.mean(xs) * 1.0)
+
+    assert len(corr_rows) > 10
+    row_drift_mm = max(corr_rows) - min(corr_rows)
+    col_drift_mm = max(corr_cols) - min(corr_cols)
+
+    # If the sign is inverted, row drift would double to >40 mm
+    assert row_drift_mm < 1.0, f"Corrected row drift {row_drift_mm:.3f} mm must be < 1.0 mm"
+    assert col_drift_mm < 1.0, f"Corrected col drift {col_drift_mm:.3f} mm must be < 1.0 mm"
+

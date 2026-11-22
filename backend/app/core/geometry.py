@@ -521,17 +521,25 @@ def correct_volume_geometry(
 
     S, R, C = vol_raw.shape
 
-    # 1. Deskew each slice in-plane by its exact IPP offset relative to the first slice
+    # 1. Deskew each slice in-plane by its exact IPP offset relative to the middle slice.
+    # Anchoring to the middle slice keeps anatomy centered in the FOV and prevents border clipping.
     deskewed_vol = np.copy(vol_raw.astype(np.float32))
     any_slice_shifted = False
 
+    mid_idx = S // 2
+    if sorted_ipps and len(sorted_ipps) == S:
+        ref_ipp = np.array(sorted_ipps[mid_idx], dtype=np.float64)
+    else:
+        ref_ipp = np.array(origin_ipp, dtype=np.float64)
+
     for k in range(S):
         if sorted_ipps and len(sorted_ipps) == S:
-            delta_ipp = np.array(sorted_ipps[k], dtype=np.float64) - np.array(sorted_ipps[0], dtype=np.float64)
+            delta_ipp = np.array(sorted_ipps[k], dtype=np.float64) - ref_ipp
             shift_x_mm = float(np.dot(delta_ipp, row_vec))
             shift_y_mm = float(np.dot(delta_ipp, col_vec))
         else:
-            pos_rel = (pos[k] - pos[0]) if len(pos) == S else (k * measured_z)
+            ref_pos = pos[mid_idx] if len(pos) == S else (mid_idx * measured_z)
+            pos_rel = (pos[k] - ref_pos) if len(pos) == S else ((k - mid_idx) * measured_z)
             shift_x_mm = 0.0
             shift_y_mm = pos_rel * float(np.tan(np.radians(tilt_deg))) if deskew_applied else 0.0
 
@@ -571,10 +579,20 @@ def correct_volume_geometry(
         z_resampled = deskewed_vol.astype(np.float32)
         Nz = S
 
+    # Project ref_ipp to pos[0] along slice normal so physical Origin
+    # reflects the mid-slice anchored reference frame while matching slice 0 at pos[0].
+    slice_normal = np.array(meta.get("slice_normal", [0.0, 0.0, 1.0]), dtype=np.float64)
+    norm_len = np.linalg.norm(slice_normal)
+    slice_normal = slice_normal / norm_len if norm_len > 1e-6 else np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    pos0 = float(pos[0]) if len(pos) > 0 else float(np.dot(ref_ipp, slice_normal))
+    mid_pos = float(np.dot(ref_ipp, slice_normal))
+    origin_pt = ref_ipp + (pos0 - mid_pos) * slice_normal
+    origin_tuple = tuple(float(x) for x in origin_pt)
+
     # 3. Build SimpleITK image with exact origin & direction and resample in-plane to isotropic
     z_img = sitk.GetImageFromArray(z_resampled)
     z_img.SetSpacing((col_spacing, row_spacing, iso_spacing))
-    z_img.SetOrigin(tuple(float(x) for x in origin_ipp))
+    z_img.SetOrigin(origin_tuple)
     z_img.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
 
     out_cols = int(round(C * col_spacing / iso_spacing))

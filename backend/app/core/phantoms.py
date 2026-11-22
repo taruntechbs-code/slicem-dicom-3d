@@ -236,3 +236,8 @@ def generate_sphere_phantom(
         "created_files_count": len(created_files),
         "output_dir": str(output_dir),
     }
+
+
+# Standard alias for tilted CT phantom generation
+generate_tilted_sphere_dicom = generate_sphere_phantom
+
