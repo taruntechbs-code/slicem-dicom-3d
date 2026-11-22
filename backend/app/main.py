@@ -1,5 +1,7 @@
 """FastAPI application entrypoint for SliceM backend."""
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router as api_router
@@ -15,10 +17,18 @@ app = FastAPI(
     version=VERSION,
 )
 
-# CORS configuration
+# CORS configuration: allow local dev, production tarunlabs.earth domains, and any extra ALLOWED_ORIGINS
+origins = list(ALLOWED_ORIGINS)
+extra_origins = os.getenv("ALLOWED_ORIGINS", "")
+if extra_origins:
+    for o in extra_origins.split(","):
+        cleaned = o.strip()
+        if cleaned and cleaned not in origins:
+            origins.append(cleaned)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

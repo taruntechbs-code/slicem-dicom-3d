@@ -172,3 +172,34 @@ def test_case_report_strict_extra_field_rejection():
         )
 
 
+def test_cors_allowed_origins():
+    """Verify production CORS origins and X-Slice-Count expose header."""
+    origins_to_test = [
+        "https://slicem.tarunlabs.earth",
+        "https://tarunlabs.earth",
+        "https://www.tarunlabs.earth",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+    for origin in origins_to_test:
+        # Preflight OPTIONS
+        res_opt = client.options(
+            "/api/health",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert res_opt.headers.get("access-control-allow-origin") == origin
+
+        # Actual GET request exposes custom headers like X-Slice-Count
+        res_get = client.get(
+            "/api/health",
+            headers={
+                "Origin": origin,
+            },
+        )
+        assert res_get.headers.get("access-control-allow-origin") == origin
+        assert "X-Slice-Count" in res_get.headers.get("access-control-expose-headers", "")
+
+

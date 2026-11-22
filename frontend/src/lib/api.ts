@@ -2,10 +2,11 @@ import { CaseReport, HealthResponse } from '../types/case';
 import { BenchmarkMeta, BenchmarkRunSummary } from '../types/benchmark';
 
 /**
- * Base URL for the backend API, read from Vite environment variable VITE_API_URL.
+ * Base URL for the backend API, read from Vite environment variable VITE_API_BASE_URL (or VITE_API_URL).
  * Defaults to http://localhost:8000 when not provided.
  */
-const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
+export const API_BASE = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
+const API_BASE_URL = API_BASE;
 
 export interface PhantomParams {
   shuffle_filenames?: boolean;
