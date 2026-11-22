@@ -13,6 +13,5 @@ nibabel>=5.2.0
 vtk>=9.2.0
 trimesh>=4.0.0
 fpdf2>=2.8.0
-gradio>=4.0.0
 spaces
 TotalSegmentator>=2.0.0

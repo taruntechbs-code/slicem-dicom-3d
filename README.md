@@ -1,3 +1,17 @@
+---
+title: Slicem Api
+emoji: 🐠
+colorFrom: gray
+colorTo: red
+sdk: gradio
+sdk_version: 6.32.0
+python_version: '3.11'
+app_file: app.py
+pinned: false
+license: mit
+short_description: SliceM 3D DICOM reconstruction & segmentation API
+---
+
 # SliceM — Geometry-First 3D Anatomical Reconstruction Pipeline
 
 > **Geometry-first 3D anatomical reconstruction from DICOM (CT and MRI)**  
