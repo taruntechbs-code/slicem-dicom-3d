@@ -65,6 +65,7 @@ class SegmentRequest(BaseModel):
     engine: str = Field(default="phantom_threshold", description="Segmentation engine name")
     roi_subset: Optional[List[str]] = Field(default=None, description="Optional ROI structure subset")
     sync: bool = Field(default=False, description="Whether to run synchronously instead of background task")
+    task: Optional[str] = Field(default=None, description="Optional TotalSegmentator task override (e.g. total, total_mr, breasts, heartchambers_highres)")
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -493,6 +494,7 @@ def _run_segment_task(
     case_dir: Path,
     engine: str,
     roi_subset: Optional[List[str]],
+    task: Optional[str] = None,
 ) -> None:
     """Background worker for asynchronous anatomical segmentation."""
     def callback(pct: int, msg: str) -> None:
@@ -500,7 +502,7 @@ def _run_segment_task(
 
     try:
         _update_segment_job(case_dir, "running", 5, "Starting segmentation background task...")
-        run_segmentation(case_dir, engine=engine, roi_subset=roi_subset, job_callback=callback)
+        run_segmentation(case_dir, engine=engine, roi_subset=roi_subset, job_callback=callback, task=task)
         _update_segment_job(case_dir, "completed", 100, "Segmentation completed successfully.")
     except Exception as exc:
         logger.exception("Segmentation task failed for %s: %s", case_dir.name, exc)
@@ -533,7 +535,7 @@ def start_segmentation(
     if is_sync:
         _update_segment_job(case_dir, "running", 5, "Starting synchronous segmentation...")
         try:
-            report = run_segmentation(case_dir, engine=req.engine, roi_subset=req.roi_subset)
+            report = run_segmentation(case_dir, engine=req.engine, roi_subset=req.roi_subset, task=req.task)
             _update_segment_job(case_dir, "completed", 100, "Segmentation completed successfully.")
             return report
         except Exception as exc:
@@ -545,7 +547,7 @@ def start_segmentation(
 
     # Async background task execution
     _update_segment_job(case_dir, "queued", 0, "Segmentation queued.")
-    background_tasks.add_task(_run_segment_task, case_dir, req.engine, req.roi_subset)
+    background_tasks.add_task(_run_segment_task, case_dir, req.engine, req.roi_subset, req.task)
     return {
         "case_id": case_id,
         "job_status": _get_segment_job(case_dir),

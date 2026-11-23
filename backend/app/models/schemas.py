@@ -150,6 +150,16 @@ class StructureReport(BaseModel):
         default_factory=dict,
         description="Relative file paths keyed by format (e.g. {'stl': 'meshes/liver.stl', 'obj': 'meshes/liver.obj'})",
     )
+    sphericity: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="3D sphericity metric derived from watertight mesh volume and surface area [0, 1]",
+    )
+    tissue_composition: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Percentage of organ voxels in calibrated HU bands (air_lung, fat, soft_tissue, bone_calcification)",
+    )
 
 
 class CaseReport(BaseModel):

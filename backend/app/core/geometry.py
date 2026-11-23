@@ -55,9 +55,11 @@ class SliceMeta:
         rescale_slope: float,
         rescale_intercept: float,
         gantry_tilt_header: Optional[float],
+        pixel_slice: Optional[np.ndarray] = None,
+        filename: Optional[str] = None,
     ) -> None:
         self.filepath = filepath
-        self.filename = filepath.name
+        self.filename = filename if filename is not None else filepath.name
         self.ds = ds
         self.ipp = ipp
         self.iop = iop
@@ -71,6 +73,206 @@ class SliceMeta:
         self.rescale_slope = rescale_slope
         self.rescale_intercept = rescale_intercept
         self.gantry_tilt_header = gantry_tilt_header
+        self.pixel_slice = pixel_slice
+
+
+def unpack_multiframe_dicom(fpath: Path) -> List[SliceMeta]:
+    """Unpack a single multi-frame DICOM file into per-frame SliceMeta structures.
+
+    Triggers ONLY when a single uploaded DICOM contains NumberOfFrames > 1 and
+    PerFrameFunctionalGroupsSequence (5200,9230). Extracts per-frame
+    ImagePositionPatient (0020,0032) and ImageOrientationPatient (0020,0037).
+    """
+    fpath = Path(fpath)
+    if not fpath.is_file():
+        return []
+
+    try:
+        ds = pydicom.dcmread(str(fpath), force=True)
+    except Exception:
+        return []
+
+    num_frames = int(getattr(ds, "NumberOfFrames", 1))
+    if num_frames <= 1:
+        return []
+
+    has_per_frame = "PerFrameFunctionalGroupsSequence" in ds or (0x5200, 0x9230) in ds
+    if not has_per_frame:
+        return []
+
+    per_frame_seq = (
+        ds.PerFrameFunctionalGroupsSequence
+        if "PerFrameFunctionalGroupsSequence" in ds
+        else ds[0x5200, 0x9230]
+    )
+
+    shared_seq = (
+        ds.SharedFunctionalGroupsSequence
+        if "SharedFunctionalGroupsSequence" in ds
+        else (ds[0x5200, 0x9229] if (0x5200, 0x9229) in ds else None)
+    )
+
+    modality_raw = str(getattr(ds, "Modality", "UNKNOWN")).upper()
+    if "CT" in modality_raw:
+        modality = "CT"
+    elif "MR" in modality_raw:
+        modality = "MRI"
+    else:
+        modality = "UNKNOWN"
+
+    rescale_slope_root = float(getattr(ds, "RescaleSlope", 1.0))
+    rescale_intercept_root = float(getattr(ds, "RescaleIntercept", 0.0))
+    gantry_tilt_header = (
+        float(ds.GantryDetectorTilt)
+        if "GantryDetectorTilt" in ds and ds.GantryDetectorTilt is not None
+        else None
+    )
+
+    try:
+        full_pixel_array = ds.pixel_array
+    except Exception:
+        full_pixel_array = None
+
+    rows = int(
+        getattr(
+            ds,
+            "Rows",
+            full_pixel_array.shape[1]
+            if full_pixel_array is not None and full_pixel_array.ndim >= 2
+            else 0,
+        )
+    )
+    cols = int(
+        getattr(
+            ds,
+            "Columns",
+            full_pixel_array.shape[2]
+            if full_pixel_array is not None and full_pixel_array.ndim >= 3
+            else 0,
+        )
+    )
+
+    # Shared functional group fallbacks
+    shared_iop = None
+    shared_spacing = None
+    shared_thickness = None
+    if shared_seq and len(shared_seq) > 0:
+        s_item = shared_seq[0]
+        if "PlaneOrientationSequence" in s_item and len(s_item.PlaneOrientationSequence) > 0:
+            shared_iop = np.array(
+                [float(x) for x in s_item.PlaneOrientationSequence[0].ImageOrientationPatient],
+                dtype=np.float64,
+            )
+        if "PixelMeasuresSequence" in s_item and len(s_item.PixelMeasuresSequence) > 0:
+            pm = s_item.PixelMeasuresSequence[0]
+            if "PixelSpacing" in pm:
+                shared_spacing = [float(pm.PixelSpacing[0]), float(pm.PixelSpacing[1])]
+            if "SliceThickness" in pm:
+                shared_thickness = float(pm.SliceThickness)
+
+    slices: List[SliceMeta] = []
+    actual_frames = min(num_frames, len(per_frame_seq))
+
+    for idx in range(actual_frames):
+        f_item = per_frame_seq[idx]
+
+        # 1. ImagePositionPatient
+        ipp = None
+        if "PlanePositionSequence" in f_item and len(f_item.PlanePositionSequence) > 0:
+            pp = f_item.PlanePositionSequence[0]
+            if "ImagePositionPatient" in pp:
+                ipp = np.array([float(x) for x in pp.ImagePositionPatient], dtype=np.float64)
+        if ipp is None and "ImagePositionPatient" in f_item:
+            ipp = np.array([float(x) for x in f_item.ImagePositionPatient], dtype=np.float64)
+        if ipp is None and "ImagePositionPatient" in ds:
+            ipp = np.array([float(x) for x in ds.ImagePositionPatient], dtype=np.float64)
+        if ipp is None:
+            ipp = np.array([0.0, 0.0, float(idx)], dtype=np.float64)
+
+        # 2. ImageOrientationPatient
+        iop = None
+        if "PlaneOrientationSequence" in f_item and len(f_item.PlaneOrientationSequence) > 0:
+            po = f_item.PlaneOrientationSequence[0]
+            if "ImageOrientationPatient" in po:
+                iop = np.array([float(x) for x in po.ImageOrientationPatient], dtype=np.float64)
+        if iop is None and shared_iop is not None:
+            iop = shared_iop.copy()
+        if iop is None and "ImageOrientationPatient" in ds:
+            iop = np.array([float(x) for x in ds.ImageOrientationPatient], dtype=np.float64)
+        if iop is None:
+            iop = np.array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0], dtype=np.float64)
+
+        # Normal vector
+        row_cos = iop[:3]
+        col_cos = iop[3:]
+        normal = np.cross(row_cos, col_cos)
+        norm = np.linalg.norm(normal)
+        if norm < 1e-6:
+            normal = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+        else:
+            normal = normal / norm
+
+        pos = float(np.dot(ipp, normal))
+
+        # 3. PixelSpacing and SliceThickness
+        pixel_spacing = None
+        declared_thick = None
+        if "PixelMeasuresSequence" in f_item and len(f_item.PixelMeasuresSequence) > 0:
+            pm = f_item.PixelMeasuresSequence[0]
+            if "PixelSpacing" in pm:
+                pixel_spacing = [float(pm.PixelSpacing[0]), float(pm.PixelSpacing[1])]
+            if "SliceThickness" in pm:
+                declared_thick = float(pm.SliceThickness)
+        if pixel_spacing is None and shared_spacing is not None:
+            pixel_spacing = list(shared_spacing)
+        if pixel_spacing is None:
+            if "PixelSpacing" in ds and len(ds.PixelSpacing) >= 2:
+                pixel_spacing = [float(ds.PixelSpacing[0]), float(ds.PixelSpacing[1])]
+            else:
+                pixel_spacing = [1.0, 1.0]
+
+        if declared_thick is None and shared_thickness is not None:
+            declared_thick = shared_thickness
+        if declared_thick is None and "SliceThickness" in ds:
+            declared_thick = float(ds.SliceThickness)
+
+        # 4. Rescale slope/intercept
+        rescale_slope = rescale_slope_root
+        rescale_intercept = rescale_intercept_root
+        if "PixelValueTransformationSequence" in f_item and len(f_item.PixelValueTransformationSequence) > 0:
+            pvt = f_item.PixelValueTransformationSequence[0]
+            rescale_slope = float(getattr(pvt, "RescaleSlope", rescale_slope))
+            rescale_intercept = float(getattr(pvt, "RescaleIntercept", rescale_intercept))
+
+        # 5. Extract frame pixel slice
+        if full_pixel_array is not None and full_pixel_array.ndim >= 3 and idx < full_pixel_array.shape[0]:
+            frame_slice = full_pixel_array[idx]
+        elif full_pixel_array is not None and full_pixel_array.ndim == 2:
+            frame_slice = full_pixel_array
+        else:
+            frame_slice = np.zeros((rows, cols), dtype=np.float32)
+
+        slice_meta = SliceMeta(
+            filepath=fpath,
+            ds=ds,
+            ipp=ipp,
+            iop=iop,
+            normal=normal,
+            pos=pos,
+            pixel_spacing=pixel_spacing,
+            declared_thickness=declared_thick,
+            rows=rows,
+            cols=cols,
+            modality=modality,
+            rescale_slope=rescale_slope,
+            rescale_intercept=rescale_intercept,
+            gantry_tilt_header=gantry_tilt_header,
+            pixel_slice=frame_slice,
+            filename=f"{fpath.name}#frame_{idx:04d}",
+        )
+        slices.append(slice_meta)
+
+    return slices
 
 
 def analyze_dicom_series(
@@ -126,77 +328,88 @@ def analyze_dicom_series(
     original_filenames = [f.name for f in dcm_candidates]
     parsed_slices: List[SliceMeta] = []
 
-    for fpath in dcm_candidates:
+    # Check for single-file multi-frame enhanced DICOM
+    if len(dcm_candidates) == 1:
         try:
-            ds = pydicom.dcmread(str(fpath), force=True)
-            if "ImagePositionPatient" not in ds or "ImageOrientationPatient" not in ds:
-                warnings.append(f"File {fpath.name} lacks required IPP/IOP geometry tags.")
-                continue
-
-            ipp = np.array([float(x) for x in ds.ImagePositionPatient], dtype=np.float64)
-            iop = np.array([float(x) for x in ds.ImageOrientationPatient], dtype=np.float64)
-
-            # Compute slice unit normal from direction cosines
-            row_cos = iop[:3]
-            col_cos = iop[3:]
-            normal = np.cross(row_cos, col_cos)
-            norm = np.linalg.norm(normal)
-            if norm < 1e-6:
-                warnings.append(f"File {fpath.name} has degenerate orthogonal direction cosines.")
-                continue
-            normal = normal / norm
-
-            # Physical projection along acquisition normal
-            pos = float(np.dot(ipp, normal))
-
-            # Pixel spacing
-            if "PixelSpacing" in ds and len(ds.PixelSpacing) >= 2:
-                pixel_spacing = [float(ds.PixelSpacing[0]), float(ds.PixelSpacing[1])]
-            else:
-                pixel_spacing = [1.0, 1.0]
-                warnings.append(f"File {fpath.name} missing PixelSpacing tag; defaulted to 1.0x1.0 mm.")
-
-            declared_thick = float(ds.SliceThickness) if "SliceThickness" in ds else None
-            rows = int(getattr(ds, "Rows", 0))
-            cols = int(getattr(ds, "Columns", 0))
-
-            modality_raw = str(getattr(ds, "Modality", "UNKNOWN")).upper()
-            if "CT" in modality_raw:
-                modality = "CT"
-            elif "MR" in modality_raw:
-                modality = "MRI"
-            else:
-                modality = "UNKNOWN"
-
-            rescale_slope = float(getattr(ds, "RescaleSlope", 1.0))
-            rescale_intercept = float(getattr(ds, "RescaleIntercept", 0.0))
-
-            gantry_tilt_header = (
-                float(ds.GantryDetectorTilt)
-                if "GantryDetectorTilt" in ds and ds.GantryDetectorTilt is not None
-                else None
-            )
-
-            parsed_slices.append(
-                SliceMeta(
-                    filepath=fpath,
-                    ds=ds,
-                    ipp=ipp,
-                    iop=iop,
-                    normal=normal,
-                    pos=pos,
-                    pixel_spacing=pixel_spacing,
-                    declared_thickness=declared_thick,
-                    rows=rows,
-                    cols=cols,
-                    modality=modality,
-                    rescale_slope=rescale_slope,
-                    rescale_intercept=rescale_intercept,
-                    gantry_tilt_header=gantry_tilt_header,
-                )
-            )
+            mf_slices = unpack_multiframe_dicom(dcm_candidates[0])
+            if mf_slices:
+                parsed_slices = mf_slices
+                original_filenames = [s.filename for s in parsed_slices]
         except Exception as exc:
-            warnings.append(f"Failed to read DICOM file {fpath.name}: {exc}")
+            warnings.append(f"Failed to unpack multi-frame DICOM: {exc}")
+
+    if not parsed_slices:
+        for fpath in dcm_candidates:
+            try:
+                ds = pydicom.dcmread(str(fpath), force=True)
+                if "ImagePositionPatient" not in ds or "ImageOrientationPatient" not in ds:
+                    warnings.append(f"File {fpath.name} lacks required IPP/IOP geometry tags.")
+                    continue
+
+                ipp = np.array([float(x) for x in ds.ImagePositionPatient], dtype=np.float64)
+                iop = np.array([float(x) for x in ds.ImageOrientationPatient], dtype=np.float64)
+
+                # Compute slice unit normal from direction cosines
+                row_cos = iop[:3]
+                col_cos = iop[3:]
+                normal = np.cross(row_cos, col_cos)
+                norm = np.linalg.norm(normal)
+                if norm < 1e-6:
+                    warnings.append(f"File {fpath.name} has degenerate orthogonal direction cosines.")
+                    continue
+                normal = normal / norm
+
+                # Physical projection along acquisition normal
+                pos = float(np.dot(ipp, normal))
+
+                # Pixel spacing
+                if "PixelSpacing" in ds and len(ds.PixelSpacing) >= 2:
+                    pixel_spacing = [float(ds.PixelSpacing[0]), float(ds.PixelSpacing[1])]
+                else:
+                    pixel_spacing = [1.0, 1.0]
+                    warnings.append(f"File {fpath.name} missing PixelSpacing tag; defaulted to 1.0x1.0 mm.")
+
+                declared_thick = float(ds.SliceThickness) if "SliceThickness" in ds else None
+                rows = int(getattr(ds, "Rows", 0))
+                cols = int(getattr(ds, "Columns", 0))
+
+                modality_raw = str(getattr(ds, "Modality", "UNKNOWN")).upper()
+                if "CT" in modality_raw:
+                    modality = "CT"
+                elif "MR" in modality_raw:
+                    modality = "MRI"
+                else:
+                    modality = "UNKNOWN"
+
+                rescale_slope = float(getattr(ds, "RescaleSlope", 1.0))
+                rescale_intercept = float(getattr(ds, "RescaleIntercept", 0.0))
+
+                gantry_tilt_header = (
+                    float(ds.GantryDetectorTilt)
+                    if "GantryDetectorTilt" in ds and ds.GantryDetectorTilt is not None
+                    else None
+                )
+
+                parsed_slices.append(
+                    SliceMeta(
+                        filepath=fpath,
+                        ds=ds,
+                        ipp=ipp,
+                        iop=iop,
+                        normal=normal,
+                        pos=pos,
+                        pixel_spacing=pixel_spacing,
+                        declared_thickness=declared_thick,
+                        rows=rows,
+                        cols=cols,
+                        modality=modality,
+                        rescale_slope=rescale_slope,
+                        rescale_intercept=rescale_intercept,
+                        gantry_tilt_header=gantry_tilt_header,
+                    )
+                )
+            except Exception as exc:
+                warnings.append(f"Failed to read DICOM file {fpath.name}: {exc}")
 
     if not parsed_slices:
         report = _create_failure_report(
@@ -304,7 +517,10 @@ def analyze_dicom_series(
     # ─── 5. Volume Construction & Intensity Calibration ───────────────────────
     volume_slices: List[np.ndarray] = []
     for s in sorted_slices:
-        pixel_array = s.ds.pixel_array.astype(np.float32)
+        if s.pixel_slice is not None:
+            pixel_array = s.pixel_slice.astype(np.float32)
+        else:
+            pixel_array = s.ds.pixel_array.astype(np.float32)
         if s.modality == "CT":
             # Apply Hounsfield Unit rescale
             hu_slice = pixel_array * s.rescale_slope + s.rescale_intercept

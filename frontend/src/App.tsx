@@ -149,13 +149,12 @@ export const App: React.FC = () => {
                   ? `Backend Online (${backendHealth?.version || '0.1.0'})`
                   : 'Backend Offline'
               }
-              className={`w-1.5 h-1.5 rounded-full shrink-0 transition-colors ${
-                isBackendConnected === true
+              className={`w-1.5 h-1.5 rounded-full shrink-0 transition-colors ${isBackendConnected === true
                   ? 'bg-[#30D158]'
                   : isBackendConnected === false
-                  ? 'bg-[#FF453A]'
-                  : 'bg-[#86868B]'
-              }`}
+                    ? 'bg-[#FF453A]'
+                    : 'bg-[#86868B]'
+                }`}
             />
           </div>
 
@@ -163,31 +162,28 @@ export const App: React.FC = () => {
           <div className="absolute left-1/2 -translate-x-1/2 flex items-center p-0.5 rounded-full bg-[#101012] border border-white/10 shrink-0">
             <button
               onClick={() => setAppMode('overview')}
-              className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
-                appMode === 'overview'
+              className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all duration-200 ${appMode === 'overview'
                   ? 'bg-[#2C2C2E] text-[#F5F5F7] shadow-sm'
                   : 'text-[#86868B] hover:text-[#F5F5F7]'
-              }`}
+                }`}
             >
               Overview
             </button>
             <button
               onClick={() => setAppMode('pipeline')}
-              className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
-                appMode === 'pipeline'
+              className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all duration-200 ${appMode === 'pipeline'
                   ? 'bg-[#2C2C2E] text-[#F5F5F7] shadow-sm'
                   : 'text-[#86868B] hover:text-[#F5F5F7]'
-              }`}
+                }`}
             >
               Pipeline
             </button>
             <button
               onClick={() => setAppMode('benchmarks')}
-              className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
-                appMode === 'benchmarks'
+              className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all duration-200 ${appMode === 'benchmarks'
                   ? 'bg-[#2C2C2E] text-[#F5F5F7] shadow-sm'
                   : 'text-[#86868B] hover:text-[#F5F5F7]'
-              }`}
+                }`}
             >
               Benchmarks
             </button>
@@ -255,107 +251,105 @@ export const App: React.FC = () => {
                 </section>
 
                 {/* Live Pipeline Execution Progress Strip */}
-            <div className="p-3 rounded-2xl bg-[#141416] border border-white/[0.08] flex items-center justify-between gap-4 text-xs">
-              <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-0.5">
-                {[
-                  { step: 1, name: 'Load & Ingest', status: currentStep > 1 ? 'done' : currentStep === 1 ? 'active' : 'idle' },
-                  { step: 2, name: 'Geometry Verify', status: currentStep > 2 ? 'done' : currentStep === 2 ? 'active' : 'idle' },
-                  { step: 3, name: 'Motion SVR', status: currentStep > 3 ? 'done' : currentStep === 3 ? 'active' : 'idle' },
-                  { step: 4, name: 'AI Segmentation', status: currentStep > 4 ? 'done' : currentStep === 4 ? 'active' : 'idle' },
-                  { step: 5, name: 'Watertight Meshing', status: currentStep === 5 ? (activeCase.structures.some((st) => st.mesh_files?.glb) ? 'done' : 'active') : 'idle' },
-                ].map((st) => (
-                  <div key={st.step} className="flex items-center gap-2 shrink-0">
-                    <div className={`w-2 h-2 rounded-full ${
-                      st.status === 'done'
-                        ? 'bg-[#30D158]'
-                        : st.status === 'active'
-                        ? 'bg-[#0A84FF] animate-pulse ring-4 ring-[#0A84FF]/20'
-                        : 'bg-[#86868B]/40'
-                    }`} />
-                    <span className={`text-[11px] ${
-                      st.status === 'done'
-                        ? 'text-[#F5F5F7] font-medium'
-                        : st.status === 'active'
-                        ? 'text-[#0A84FF] font-semibold'
-                        : 'text-[#86868B]'
-                    }`}>
-                      {st.name}
-                    </span>
-                    {st.step < 5 && <span className="text-[#86868B]/30 ml-1">→</span>}
+                <div className="p-3 rounded-2xl bg-[#141416] border border-white/[0.08] flex items-center justify-between gap-4 text-xs">
+                  <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-0.5">
+                    {[
+                      { step: 1, name: 'Load & Ingest', status: currentStep > 1 ? 'done' : currentStep === 1 ? 'active' : 'idle' },
+                      { step: 2, name: 'Geometry Verify', status: currentStep > 2 ? 'done' : currentStep === 2 ? 'active' : 'idle' },
+                      { step: 3, name: 'Motion SVR', status: currentStep > 3 ? 'done' : currentStep === 3 ? 'active' : 'idle' },
+                      { step: 4, name: 'AI Segmentation', status: currentStep > 4 ? 'done' : currentStep === 4 ? 'active' : 'idle' },
+                      { step: 5, name: 'Watertight Meshing', status: currentStep === 5 ? (activeCase.structures.some((st) => st.mesh_files?.glb) ? 'done' : 'active') : 'idle' },
+                    ].map((st) => (
+                      <div key={st.step} className="flex items-center gap-2 shrink-0">
+                        <div className={`w-2 h-2 rounded-full ${st.status === 'done'
+                            ? 'bg-[#30D158]'
+                            : st.status === 'active'
+                              ? 'bg-[#0A84FF] animate-pulse ring-4 ring-[#0A84FF]/20'
+                              : 'bg-[#86868B]/40'
+                          }`} />
+                        <span className={`text-[11px] ${st.status === 'done'
+                            ? 'text-[#F5F5F7] font-medium'
+                            : st.status === 'active'
+                              ? 'text-[#0A84FF] font-semibold'
+                              : 'text-[#86868B]'
+                          }`}>
+                          {st.name}
+                        </span>
+                        {st.step < 5 && <span className="text-[#86868B]/30 ml-1">→</span>}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
 
-              {/* Pipeline Timings Pill */}
-              <div className="shrink-0 flex items-center gap-2 text-[11px] font-mono text-[#86868B]">
-                <span>Case: <strong className="text-[#F5F5F7] font-normal">{activeCase.case_id}</strong></span>
-                {Object.keys(activeCase.stage_timings_sec || {}).length > 0 && (
-                  <span className="hidden sm:inline text-[#86868B]/60">
-                    · {(Object.values(activeCase.stage_timings_sec).reduce((a, b) => a + b, 0)).toFixed(2)}s runtime
-                  </span>
-                )}
-              </div>
-            </div>
+                  {/* Pipeline Timings Pill */}
+                  <div className="shrink-0 flex items-center gap-2 text-[11px] font-mono text-[#86868B]">
+                    <span>Case: <strong className="text-[#F5F5F7] font-normal">{activeCase.case_id}</strong></span>
+                    {Object.keys(activeCase.stage_timings_sec || {}).length > 0 && (
+                      <span className="hidden sm:inline text-[#86868B]/60">
+                        · {(Object.values(activeCase.stage_timings_sec).reduce((a, b) => a + b, 0)).toFixed(2)}s runtime
+                      </span>
+                    )}
+                  </div>
+                </div>
 
-            {/* Dynamic Workspace Container */}
-            <div className="bg-[#141416] border border-white/[0.08] rounded-2xl p-6 lg:p-8 shadow-xl">
-              {currentStep === 1 && (
-                <LoadStepView
-                  activeCase={activeCase}
-                  cases={cases}
-                  onSelectCase={setActiveCase}
-                  onCaseCreated={handleCaseCreatedOrSelected}
-                />
-              )}
-              {currentStep === 2 && (
-                <VerifyStepView
-                  activeCase={activeCase}
-                  onProceedToCorrect={() => setCurrentStep(3)}
-                />
-              )}
-              {currentStep === 3 && (
-                <CorrectStepView
-                  activeCase={activeCase}
-                  onCaseUpdated={(updated) => {
-                    setActiveCase(updated);
-                    setCases((prev) =>
-                      prev.map((c) => (c.case_id === updated.case_id ? updated : c))
-                    );
-                  }}
-                  onProceedToSegment={() => setCurrentStep(4)}
-                />
-              )}
-              {currentStep === 4 && (
-                <SegmentStepView
-                  activeCase={activeCase}
-                  onCaseUpdated={(updated) => {
-                    setActiveCase(updated);
-                    setCases((prev) =>
-                      prev.map((c) => (c.case_id === updated.case_id ? updated : c))
-                    );
-                  }}
-                  onProceedToExport={() => setCurrentStep(5)}
-                />
-              )}
-              {currentStep === 5 && (
-                <InspectStep
-                  activeCase={activeCase}
-                  onCaseUpdated={(updated) => {
-                    setActiveCase(updated);
-                    setCases((prev) =>
-                      prev.map((c) => (c.case_id === updated.case_id ? updated : c))
-                    );
-                  }}
-                />
-              )}
-            </div>
-          </>
+                {/* Dynamic Workspace Container */}
+                <div className="bg-[#141416] border border-white/[0.08] rounded-2xl p-6 lg:p-8 shadow-xl">
+                  {currentStep === 1 && (
+                    <LoadStepView
+                      activeCase={activeCase}
+                      cases={cases}
+                      onSelectCase={setActiveCase}
+                      onCaseCreated={handleCaseCreatedOrSelected}
+                    />
+                  )}
+                  {currentStep === 2 && (
+                    <VerifyStepView
+                      activeCase={activeCase}
+                      onProceedToCorrect={() => setCurrentStep(3)}
+                    />
+                  )}
+                  {currentStep === 3 && (
+                    <CorrectStepView
+                      activeCase={activeCase}
+                      onCaseUpdated={(updated) => {
+                        setActiveCase(updated);
+                        setCases((prev) =>
+                          prev.map((c) => (c.case_id === updated.case_id ? updated : c))
+                        );
+                      }}
+                      onProceedToSegment={() => setCurrentStep(4)}
+                    />
+                  )}
+                  {currentStep === 4 && (
+                    <SegmentStepView
+                      activeCase={activeCase}
+                      onCaseUpdated={(updated) => {
+                        setActiveCase(updated);
+                        setCases((prev) =>
+                          prev.map((c) => (c.case_id === updated.case_id ? updated : c))
+                        );
+                      }}
+                      onProceedToExport={() => setCurrentStep(5)}
+                    />
+                  )}
+                  {currentStep === 5 && (
+                    <InspectStep
+                      activeCase={activeCase}
+                      onCaseUpdated={(updated) => {
+                        setActiveCase(updated);
+                        setCases((prev) =>
+                          prev.map((c) => (c.case_id === updated.case_id ? updated : c))
+                        );
+                      }}
+                    />
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         )}
-      </div>
-    )}
-  </main>
-</div>
-);
+      </main>
+    </div>
+  );
 };
 
 /* ─── Step 1: Load View ─────────────────────────────────────────────── */
@@ -484,7 +478,7 @@ const LoadStepView: React.FC<LoadStepViewProps> = ({
   useEffect(() => {
     api.listPresets()
       .then(setPresets)
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   const handleLoadPreset = async (slug: string) => {
@@ -601,11 +595,10 @@ const LoadStepView: React.FC<LoadStepViewProps> = ({
       </div>
 
       {diagnosticError && (
-        <div className={`p-4 rounded-2xl border text-xs space-y-2.5 transition-all ${
-          diagnosticError.type === 'cold_start'
+        <div className={`p-4 rounded-2xl border text-xs space-y-2.5 transition-all ${diagnosticError.type === 'cold_start'
             ? 'bg-[#FF9F0A]/10 border-[#FF9F0A]/20 text-[#FF9F0A]'
             : 'bg-[#FF453A]/10 border-[#FF453A]/20 text-[#FF453A]'
-        }`}>
+          }`}>
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-start gap-2.5">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -630,7 +623,7 @@ const LoadStepView: React.FC<LoadStepViewProps> = ({
                     api.getHealth().then(() => {
                       setDiagnosticError(null);
                       setRetryCountdown(null);
-                    }).catch(() => {});
+                    }).catch(() => { });
                   }}
                   className="px-2.5 py-1 rounded-full bg-[#FF9F0A]/20 hover:bg-[#FF9F0A]/30 text-[#FF9F0A] text-[11px] font-medium transition-all"
                 >
@@ -689,9 +682,8 @@ const LoadStepView: React.FC<LoadStepViewProps> = ({
         >
           <span>Custom Phantom</span>
           <ChevronDown
-            className={`w-3.5 h-3.5 transition-transform duration-200 ${
-              showCustomPhantom ? 'rotate-180' : ''
-            }`}
+            className={`w-3.5 h-3.5 transition-transform duration-200 ${showCustomPhantom ? 'rotate-180' : ''
+              }`}
           />
         </button>
 
@@ -999,13 +991,13 @@ const CorrectStepView: React.FC<CorrectStepViewProps> = ({
       try {
         const rCount = await api.fetchSliceCount(activeCase.case_id, 'raw', axis);
         if (isMounted && rCount > 0) setRawSliceCount(rCount);
-      } catch {}
+      } catch { }
 
       if (isCorrected) {
         try {
           const cCount = await api.fetchSliceCount(activeCase.case_id, 'corrected', axis);
           if (isMounted && cCount > 0) setCorrSliceCount(cCount);
-        } catch {}
+        } catch { }
       }
     };
 
@@ -1152,11 +1144,10 @@ const CorrectStepView: React.FC<CorrectStepViewProps> = ({
             <button
               key={plane}
               onClick={() => setAxis(plane)}
-              className={`px-3.5 py-1 rounded-full text-xs font-medium capitalize transition-all duration-200 ${
-                axis === plane
+              className={`px-3.5 py-1 rounded-full text-xs font-medium capitalize transition-all duration-200 ${axis === plane
                   ? 'bg-[#2C2C2E] text-[#F5F5F7] shadow-sm'
                   : 'text-[#86868B] hover:text-[#F5F5F7]'
-              }`}
+                }`}
             >
               {plane}
             </button>
@@ -1416,7 +1407,7 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
             setIsRunning(false);
             setErrorMessage(job.error || job.message || 'Segmentation job failed');
           }
-        } catch {}
+        } catch { }
       }, 1000);
     }
     return () => {
@@ -1473,8 +1464,8 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
     visibleIds.length > 0
       ? visibleIds
       : structures.length > 0
-      ? structures.map((st) => st.id)
-      : undefined;
+        ? structures.map((st) => st.id)
+        : undefined;
 
   const overlayUrl = api.getOverlaySliceUrl(
     activeCase.case_id,
@@ -1529,11 +1520,10 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
                     key={preset}
                     onClick={() => setRoiPreset(preset)}
                     disabled={isRunning}
-                    className={`px-2.5 py-0.5 rounded-full text-[11px] capitalize transition-all ${
-                      roiPreset === preset
+                    className={`px-2.5 py-0.5 rounded-full text-[11px] capitalize transition-all ${roiPreset === preset
                         ? 'bg-[#0A84FF] text-white'
                         : 'bg-[#141416] text-[#86868B] hover:text-[#F5F5F7]'
-                    }`}
+                      }`}
                   >
                     {preset}
                   </button>
@@ -1587,11 +1577,10 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
                 <button
                   key={plane}
                   onClick={() => setAxis(plane)}
-                  className={`px-3 py-1 rounded-full text-xs font-medium capitalize transition-all ${
-                    axis === plane
+                  className={`px-3 py-1 rounded-full text-xs font-medium capitalize transition-all ${axis === plane
                       ? 'bg-[#2C2C2E] text-[#F5F5F7] shadow-sm'
                       : 'text-[#86868B] hover:text-[#F5F5F7]'
-                  }`}
+                    }`}
                 >
                   {plane}
                 </button>
@@ -1668,11 +1657,10 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
                     <div
                       key={st.id}
                       onClick={() => toggleStructureVisibility(st.id)}
-                      className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all flex items-center justify-between ${
-                        isVisible
+                      className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all flex items-center justify-between ${isVisible
                           ? 'bg-[#141416] border-white/[0.08] text-[#F5F5F7]'
                           : 'bg-[#141416]/40 border-transparent text-[#86868B]'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center gap-2">
                         <span
@@ -1687,11 +1675,10 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
                           {(st.volume_mm3 / 1000).toFixed(1)} cm³
                         </span>
                         <div
-                          className={`w-4 h-4 rounded-full flex items-center justify-center border ${
-                            isVisible
+                          className={`w-4 h-4 rounded-full flex items-center justify-center border ${isVisible
                               ? 'bg-[#0A84FF] border-[#0A84FF] text-white'
                               : 'border-white/[0.12] text-transparent'
-                          }`}
+                            }`}
                         >
                           <Check className="w-2.5 h-2.5 stroke-[3]" />
                         </div>

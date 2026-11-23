@@ -664,6 +664,97 @@ export const InspectStep: React.FC<InspectStepProps> = ({
                     {selectedStructure.face_count.toLocaleString('en-US')}
                   </span>
                 </div>
+
+                {/* 3D Sphericity Metric */}
+                {selectedStructure.sphericity !== undefined && selectedStructure.sphericity !== null && (
+                  <div className="p-2.5 rounded-xl bg-[#1C1C1E]/60 border border-white/[0.04] col-span-2 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] text-[#86868B] block">3D Sphericity</span>
+                      <span className="font-mono tabular-nums font-semibold text-sm text-[#F5F5F7] mt-0.5 block">
+                        {selectedStructure.sphericity.toFixed(3)}
+                        <span className="text-[11px] text-[#86868B] font-normal ml-1">Ψ</span>
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] text-[#86868B] block">Geometry</span>
+                      <span className="text-xs font-medium text-[#30D158]">
+                        {selectedStructure.sphericity >= 0.9
+                          ? 'Spherical'
+                          : selectedStructure.sphericity >= 0.65
+                          ? 'Ovoid / Ellipsoidal'
+                          : 'Complex / Branched'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tissue Composition Breakdown (CT Scans) */}
+                {selectedStructure.tissue_composition && (
+                  <div className="p-2.5 rounded-xl bg-[#1C1C1E]/60 border border-white/[0.04] space-y-2 col-span-2">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-[#86868B] font-medium">Tissue Composition</span>
+                      <span className="text-[10px] text-[#86868B] font-mono">Calibrated HU</span>
+                    </div>
+                    {/* Multi-segment stacked bar */}
+                    <div className="h-2 w-full rounded-full overflow-hidden flex bg-black/40">
+                      {(selectedStructure.tissue_composition.air_lung ?? 0) > 0 && (
+                        <div
+                          style={{ width: `${selectedStructure.tissue_composition.air_lung}%` }}
+                          className="bg-[#64748B] h-full transition-all"
+                          title={`Air / Lung (< -300 HU): ${selectedStructure.tissue_composition.air_lung}%`}
+                        />
+                      )}
+                      {(selectedStructure.tissue_composition.fat ?? 0) > 0 && (
+                        <div
+                          style={{ width: `${selectedStructure.tissue_composition.fat}%` }}
+                          className="bg-[#F59E0B] h-full transition-all"
+                          title={`Adipose / Fat (-300 to -30 HU): ${selectedStructure.tissue_composition.fat}%`}
+                        />
+                      )}
+                      {(selectedStructure.tissue_composition.soft_tissue ?? 0) > 0 && (
+                        <div
+                          style={{ width: `${selectedStructure.tissue_composition.soft_tissue}%` }}
+                          className="bg-[#0A84FF] h-full transition-all"
+                          title={`Soft Tissue (-30 to +150 HU): ${selectedStructure.tissue_composition.soft_tissue}%`}
+                        />
+                      )}
+                      {(selectedStructure.tissue_composition.bone_calcification ?? 0) > 0 && (
+                        <div
+                          style={{ width: `${selectedStructure.tissue_composition.bone_calcification}%` }}
+                          className="bg-[#F5F5F7] h-full transition-all"
+                          title={`Cortical Bone / Calcification (> +150 HU): ${selectedStructure.tissue_composition.bone_calcification}%`}
+                        />
+                      )}
+                    </div>
+                    {/* Breakdown details */}
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] pt-0.5">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1.5 text-[#86868B]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#64748B]" /> Air
+                        </span>
+                        <span className="font-mono text-[#F5F5F7]">{selectedStructure.tissue_composition.air_lung ?? 0}%</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1.5 text-[#86868B]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B]" /> Fat
+                        </span>
+                        <span className="font-mono text-[#F5F5F7]">{selectedStructure.tissue_composition.fat ?? 0}%</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1.5 text-[#86868B]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#0A84FF]" /> Soft Tissue
+                        </span>
+                        <span className="font-mono text-[#F5F5F7]">{selectedStructure.tissue_composition.soft_tissue ?? 0}%</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1.5 text-[#86868B]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#F5F5F7]" /> Bone / Calc
+                        </span>
+                        <span className="font-mono text-[#F5F5F7]">{selectedStructure.tissue_composition.bone_calcification ?? 0}%</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Volume Smoothing Explanatory Footnote */}

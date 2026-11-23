@@ -19,6 +19,43 @@ from app.core.segment import get_canonical_structure_color
 from app.models.schemas import CaseReport, StructureReport
 
 
+def compute_sphericity(volume_mm3: float, surface_area_mm2: float) -> Optional[float]:
+    """Calculate 3D sphericity metric: (pi^(1/3) * (6 * V)^(2/3)) / A, clamped to [0, 1]."""
+    if volume_mm3 <= 0.0 or surface_area_mm2 <= 0.0:
+        return None
+    psi = (np.pi ** (1.0 / 3.0) * (6.0 * volume_mm3) ** (2.0 / 3.0)) / surface_area_mm2
+    return round(float(np.clip(psi, 0.0, 1.0)), 3)
+
+
+def compute_tissue_composition(intensities: np.ndarray) -> Dict[str, float]:
+    """Compute percentage of voxels in calibrated CT Hounsfield Unit bands.
+
+    Bands:
+      - air_lung: < -300 HU
+      - fat: -300 to -30 HU
+      - soft_tissue: -30 to +150 HU
+      - bone_calcification: > +150 HU
+    """
+    if len(intensities) == 0:
+        return {
+            "air_lung": 0.0,
+            "fat": 0.0,
+            "soft_tissue": 0.0,
+            "bone_calcification": 0.0,
+        }
+    total = len(intensities)
+    air_cnt = int(np.sum(intensities < -300.0))
+    fat_cnt = int(np.sum((intensities >= -300.0) & (intensities < -30.0)))
+    soft_cnt = int(np.sum((intensities >= -30.0) & (intensities <= 150.0)))
+    bone_cnt = int(np.sum(intensities > 150.0))
+    return {
+        "air_lung": round(float(air_cnt / total * 100.0), 1),
+        "fat": round(float(fat_cnt / total * 100.0), 1),
+        "soft_tissue": round(float(soft_cnt / total * 100.0), 1),
+        "bone_calcification": round(float(bone_cnt / total * 100.0), 1),
+    }
+
+
 def compute_structure_analytics(
     case_dir: Path,
     mesh_results: List[Dict[str, Any]],
@@ -112,6 +149,19 @@ def compute_structure_analytics(
         )
         st_color = meta_entry.get("color") or get_canonical_structure_color(struct_id)
 
+        # 3D Sphericity from mesh volume and surface area
+        vol_v = float(mesh_data.get("volume_mm3", 0.0))
+        area_a = float(mesh_data.get("surface_area_mm2", 0.0))
+        sphericity = compute_sphericity(vol_v, area_a)
+
+        # Tissue composition for CT scans
+        is_ct = getattr(report.scan, "modality", "UNKNOWN") == "CT"
+        tissue_comp = (
+            compute_tissue_composition(intensities)
+            if (is_ct and len(intensities) > 0)
+            else meta_entry.get("tissue_composition")
+        )
+
         st_report = StructureReport(
             id=struct_id,
             name=name,
@@ -127,6 +177,8 @@ def compute_structure_analytics(
             face_count=mesh_data["face_count"],
             topology_components=max(1, comps),
             mesh_files=mesh_data["mesh_files"],
+            sphericity=sphericity,
+            tissue_composition=tissue_comp,
         )
         consolidated_structures.append(st_report)
 

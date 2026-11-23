@@ -223,7 +223,8 @@ def _segment_totalsegmentator(
     fast: bool,
     roi_subset: Optional[List[str]] = None,
     job_callback: Optional[Callable[[int, str], None]] = None,
-) -> Tuple[sitk.Image, Dict[int, str]]:
+    task: Optional[str] = None,
+) -> Tuple[sitk.Image, Dict[int, str], str]:
     """Execute TotalSegmentator in an isolated subprocess with macOS-safe multiprocessing/device settings.
 
     Running in an isolated subprocess avoids Apple Silicon MPS 3D operator crashes and
@@ -274,7 +275,16 @@ def _segment_totalsegmentator(
     else:
         target_device = "cpu"
 
-    task = "total_mr" if modality == "MRI" else "total"
+    if task:
+        if task == "heartchambers_highres" and not os.environ.get("TOTALSEG_LICENSE_KEY"):
+            raise ValueError(
+                "Task 'heartchambers_highres' requires TOTALSEG_LICENSE_KEY environment variable to be configured."
+            )
+        chosen_task = task
+    elif modality in ("MRI", "MR"):
+        chosen_task = "total_mr"
+    else:
+        chosen_task = "total"
 
     def build_cmd(dev: str) -> List[str]:
         c = list(base_cmd)
@@ -282,7 +292,7 @@ def _segment_totalsegmentator(
             "-i", str(volume_path),
             "-o", str(out_ml_path),
             "--ml",
-            "-ta", task,
+            "-ta", chosen_task,
             "--device", dev,
             "--nr_thr_resamp", "1",
             "--nr_thr_saving", "1",
@@ -375,7 +385,7 @@ def _segment_totalsegmentator(
 
     try:
         from totalsegmentator.map_to_binary import class_map
-        task_map = class_map.get(task, class_map.get("total", {}))
+        task_map = class_map.get(chosen_task, class_map.get("total", {}))
     except Exception:
         task_map = {}
 
@@ -415,6 +425,7 @@ def run_segmentation(
     engine: str = "phantom_threshold",
     roi_subset: Optional[List[str]] = None,
     job_callback: Optional[Callable[[int, str], None]] = None,
+    task: Optional[str] = None,
 ) -> CaseReport:
     """Run modular multi-organ anatomical segmentation, cleanup, and metrics export.
 
@@ -424,6 +435,7 @@ def run_segmentation(
                 'totalsegmentator_full', or 'nnunet_custom'.
         roi_subset: Optional list of anatomical structures to isolate.
         job_callback: Optional progress reporter callback (progress_percent: int, message: str).
+        task: Optional task override for TotalSegmentator (e.g. 'breasts', 'heartchambers_highres', 'total_mr').
 
     Returns:
         Updated CaseReport with populated segmentation metrics and structures list.
@@ -487,6 +499,7 @@ def run_segmentation(
             fast=fast_mode,
             roi_subset=roi_subset,
             job_callback=job_callback,
+            task=task,
         )
         volume_img = sitk.ReadImage(str(vol_path))
     elif engine == "nnunet_custom":
@@ -548,6 +561,15 @@ def run_segmentation(
         color = get_canonical_structure_color(label_id)
         comp_count = max(1, topology_meta.get(label_id, {}).get("final_components", 1))
 
+        # Tissue composition for CT scans
+        from app.core.analytics import compute_tissue_composition
+        is_ct = report.scan.modality == "CT"
+        tissue_comp = (
+            compute_tissue_composition(voxel_intensities)
+            if (is_ct and voxel_count > 0)
+            else None
+        )
+
         struct_report = StructureReport(
             id=int(label_id),
             name=name,
@@ -563,6 +585,8 @@ def run_segmentation(
             face_count=0,
             topology_components=comp_count,
             mesh_files={},
+            sphericity=None,
+            tissue_composition=tissue_comp,
         )
         structures.append(struct_report)
 
@@ -573,6 +597,7 @@ def run_segmentation(
             "voxel_count": voxel_count,
             "volume_mm3": round(volume_mm3, 2),
             "topology_components": comp_count,
+            "tissue_composition": tissue_comp,
             "warnings": [w for w in topology_warnings if f"'{name}'" in w],
         })
 

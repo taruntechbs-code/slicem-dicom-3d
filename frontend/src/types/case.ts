@@ -62,6 +62,14 @@ export interface StructureReport {
   face_count: number;
   topology_components: number;
   mesh_files: Record<string, string>;
+  sphericity?: number | null;
+  tissue_composition?: {
+    air_lung?: number;
+    fat?: number;
+    soft_tissue?: number;
+    bone_calcification?: number;
+    [key: string]: number | undefined;
+  } | null;
 }
 
 export interface CaseReport {
