@@ -64,6 +64,54 @@ def clean_pdf_text(val: Any) -> str:
     return text
 
 
+def fit_text(pdf: FPDF, text: Any, max_w: float, margin: float = 2.0) -> str:
+    """Truncate text with ellipsis if it exceeds (max_w - margin) in the current PDF font."""
+    if text is None:
+        return ""
+    s = clean_pdf_text(str(text)).strip()
+    target_w = max(1.0, max_w - margin)
+    if pdf.get_string_width(s) <= target_w:
+        return s
+    ellipsis = "..."
+    if pdf.get_string_width(ellipsis) > target_w:
+        return ""
+    cur = s
+    while cur and pdf.get_string_width(cur + ellipsis) > target_w:
+        cur = cur[:-1]
+    return cur.rstrip() + ellipsis if cur else ellipsis
+
+
+def split_two_lines(pdf: FPDF, text: Any, max_w: float, margin: float = 1.5) -> Tuple[str, Optional[str]]:
+    """Split text into up to two lines constrained to max_w, with ellipsis on second line if needed."""
+    if text is None:
+        return "", None
+    s = clean_pdf_text(str(text)).strip()
+    target_w = max(1.0, max_w - margin)
+    if pdf.get_string_width(s) <= target_w:
+        return s, None
+
+    words = s.split()
+    line1_words: List[str] = []
+    line2_words: List[str] = []
+
+    for i, w in enumerate(words):
+        test_line = " ".join(line1_words + [w])
+        if pdf.get_string_width(test_line) <= target_w:
+            line1_words.append(w)
+        else:
+            line2_words = words[i:]
+            break
+
+    if not line1_words:
+        # First word is longer than target_w
+        return fit_text(pdf, s, max_w, margin=margin), None
+
+    line1 = " ".join(line1_words)
+    line2_raw = " ".join(line2_words)
+    line2 = fit_text(pdf, line2_raw, max_w, margin=margin)
+    return line1, line2
+
+
 class AppleReportPDF(FPDF):
     """Custom FPDF subclass that automatically sanitizes all cell text."""
 
@@ -330,7 +378,7 @@ def generate_case_pdf(case_dir: Path) -> bytes:
 
     # Initialize A4 Portrait document (210 x 297 mm) with AppleReportPDF
     pdf = AppleReportPDF(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(False)
+    pdf.set_auto_page_break(auto=False, margin=10)
     pdf.set_margins(14, 12, 14)
     pdf.add_page()
 
@@ -390,7 +438,7 @@ def generate_case_pdf(case_dir: Path) -> bytes:
         xy_sp = report.scan.pixel_spacing_mm[0] if report.scan.pixel_spacing_mm else 0.0
         if report.geometry.warnings:
             w_first = report.geometry.warnings[0].strip()
-            if "reordering" in w_first.lower():
+            if "reorder" in w_first.lower():
                 warn_reason = "Non-monotonic IPP sequence (reordered along normal)"
             elif "variable" in w_first.lower() or "non-equidistant" in w_first.lower():
                 warn_reason = "Non-equidistant slice gaps (resampled to isotropic)"
@@ -401,7 +449,7 @@ def generate_case_pdf(case_dir: Path) -> bytes:
             elif "tilt" in w_first.lower():
                 warn_reason = f"Gantry tilt ({report.geometry.gantry_tilt_deg:.1f} deg detected)"
             else:
-                warn_reason = w_first[:65]
+                warn_reason = w_first[:120]
         elif xy_sp > 0 and z_sp > 1.25 * xy_sp:
             warn_reason = f"Anisotropic acquisition ({z_sp:.2f} mm Z vs {xy_sp:.2f} mm XY; resampled)"
         else:
@@ -411,14 +459,16 @@ def generate_case_pdf(case_dir: Path) -> bytes:
         pdf.set_xy(PAGE_WIDTH - MARGIN - 110.0, badge_y + badge_h + 0.8)
         pdf.set_text_color(185, 119, 14)
         pdf.set_font("Helvetica", "I", 6.2)
-        pdf.cell(110.0, 3.0, f"Warning Reason: {clean_pdf_text(warn_reason)}", align="R")
+        warn_hdr = fit_text(pdf, f"Warning Reason: {clean_pdf_text(warn_reason)}", 110.0, margin=1.0)
+        pdf.cell(110.0, 3.0, warn_hdr, align="R")
 
     # Case ID & Timestamp
     created_dt = report.created_at[:19].replace("T", " ")
     pdf.set_xy(PAGE_WIDTH - MARGIN - 90.0, 21.0 if (status_str == "WARN" and warn_reason) else 20.0)
     pdf.set_text_color(*C_TEXT)
     pdf.set_font("Courier", "B", 7.5)
-    pdf.cell(90.0, 3.5, f"Case: {report.case_id}", align="R")
+    case_hdr = fit_text(pdf, f"Case: {report.case_id}", 90.0, margin=1.0)
+    pdf.cell(90.0, 3.5, case_hdr, align="R")
 
     pdf.set_xy(PAGE_WIDTH - MARGIN - 90.0, 24.5 if (status_str == "WARN" and warn_reason) else 23.8)
     pdf.set_text_color(*C_MUTED)
@@ -467,7 +517,7 @@ def generate_case_pdf(case_dir: Path) -> bytes:
         pdf.set_xy(tx + 2.5, strip_y + 6.2)
         pdf.set_text_color(*C_TEXT)
         pdf.set_font("Helvetica", "B", 8.0)
-        pdf.cell(tile_w - 5.0, 4.5, val)
+        pdf.cell(tile_w - 5.0, 4.5, fit_text(pdf, val, tile_w - 5.0, margin=1.0))
 
     # ─────────────────────────────────────────────────────────────────────────
     # 3. Two-Column Audit Cards (Geometry & Processing Telemetry)
@@ -476,20 +526,8 @@ def generate_case_pdf(case_dir: Path) -> bytes:
     col_w = (CONTENT_WIDTH - 4.0) / 2.0  # 89.0 mm
     col1_x = MARGIN
     col2_x = MARGIN + col_w + 4.0
-    card_h = 44.0
 
-    # Draw Apple Cards
-    pdf.set_fill_color(*C_CARD)
-    pdf.set_draw_color(*C_BORDER)
-    pdf.rect(col1_x, curr_y, col_w, card_h, style="DF")
-    pdf.rect(col2_x, curr_y, col_w, card_h, style="DF")
-
-    # Left Card: Geometry Verification
-    pdf.set_xy(col1_x + 3.5, curr_y + 2.5)
-    pdf.set_text_color(*C_TEXT)
-    pdf.set_font("Helvetica", "B", 8.0)
-    pdf.cell(col_w - 7.0, 4.0, "Geometry Verification")
-
+    # Geometry Items
     spacing_mismatch_label = (
         f"{abs(report.geometry.spacing_mismatch_mm):.3f} mm"
         if report.geometry.spacing_mismatch_mm is not None
@@ -507,40 +545,8 @@ def generate_case_pdf(case_dir: Path) -> bytes:
         ("Missing Slice Gaps", missing_slice_label),
         ("Geometry Verification Status", report.geometry.status),
     ]
-    if (report.geometry.status == "WARN" or status_str == "WARN") and warn_reason:
-        geom_items.append(("Warning Reason", warn_reason))
 
-    row_y = curr_y + 7.2
-    row_step = 4.8 if len(geom_items) > 6 else 5.2
-    for label, val in geom_items:
-        pdf.set_xy(col1_x + 3.5, row_y)
-        pdf.set_text_color(*C_MUTED)
-        pdf.set_font("Helvetica", "", 6.8)
-        pdf.cell(41.0, 4.8, label)
-
-        if label == "Geometry Verification Status":
-            pdf.set_font("Helvetica", "B", 6.8)
-            if val == "PASS":
-                pdf.set_text_color(29, 131, 72)
-            else:
-                pdf.set_text_color(185, 119, 14)
-        elif label == "Warning Reason":
-            pdf.set_font("Helvetica", "I", 6.2)
-            pdf.set_text_color(185, 119, 14)
-        else:
-            pdf.set_font("Helvetica", "", 6.8)
-            pdf.set_text_color(*C_TEXT)
-
-        pdf.cell(col_w - 45.0, 4.8, val)
-        row_y += row_step
-
-    # Right Card: Processing & Segmentation Telemetry
-    pdf.set_xy(col2_x + 3.5, curr_y + 2.5)
-    pdf.set_text_color(*C_TEXT)
-    pdf.set_font("Helvetica", "B", 8.0)
-    pdf.cell(col_w - 7.0, 4.0, "Processing & Segmentation")
-
-    # Accurate telemetry values
+    # Processing & Segmentation Telemetry
     if report.motion.applied:
         mot_applied_str = "Applied (2D-3D SVR)"
         max_shift_str = f"{report.motion.max_residual_shift_mm:.2f} mm" if report.motion.max_residual_shift_mm is not None else "N/A"
@@ -583,22 +589,103 @@ def generate_case_pdf(case_dir: Path) -> bytes:
         ("Extracted Anatomical Solids", struct_count_str),
     ]
 
-    row_y = curr_y + 7.2
-    row_step = 4.8 if len(proc_items) > 6 else 5.2
+    # Pre-check if Left Card has a multi-line warning reason
+    warn_multiline = False
+    warn_l1 = ""
+    warn_l2: Optional[str] = None
+    if (report.geometry.status == "WARN" or status_str == "WARN") and warn_reason:
+        pdf.set_font("Helvetica", "I", 6.2)
+        warn_l1, warn_l2 = split_two_lines(pdf, warn_reason, col_w - 45.0, margin=1.5)
+        if warn_l2:
+            warn_multiline = True
+
+    card_h = 46.5 if warn_multiline else 44.0
+    y_start = curr_y
+
+    # Draw Apple Cards Background
+    pdf.set_fill_color(*C_CARD)
+    pdf.set_draw_color(*C_BORDER)
+    pdf.rect(col1_x, y_start, col_w, card_h, style="DF")
+    pdf.rect(col2_x, y_start, col_w, card_h, style="DF")
+
+    # Left Card: Geometry Verification
+    pdf.set_xy(col1_x + 3.5, y_start + 2.5)
+    pdf.set_text_color(*C_TEXT)
+    pdf.set_font("Helvetica", "B", 8.0)
+    pdf.cell(col_w - 7.0, 4.0, "Geometry Verification")
+
+    row_y = y_start + 7.2
+    row_step = 4.6 if (len(geom_items) > 5 or warn_reason) else 5.2
+    for label, val in geom_items:
+        pdf.set_xy(col1_x + 3.5, row_y)
+        pdf.set_text_color(*C_MUTED)
+        pdf.set_font("Helvetica", "", 6.8)
+        lbl_text = fit_text(pdf, label, 40.0, margin=1.0)
+        pdf.cell(40.0, 4.4, lbl_text)
+
+        if label == "Geometry Verification Status":
+            pdf.set_font("Helvetica", "B", 6.8)
+            if val == "PASS":
+                pdf.set_text_color(29, 131, 72)
+            else:
+                pdf.set_text_color(185, 119, 14)
+        else:
+            pdf.set_font("Helvetica", "", 6.8)
+            pdf.set_text_color(*C_TEXT)
+
+        val_text = fit_text(pdf, val, col_w - 45.0, margin=1.5)
+        pdf.cell(col_w - 45.0, 4.4, val_text)
+        row_y += row_step
+
+    # Render Warning Reason row if WARN
+    if (report.geometry.status == "WARN" or status_str == "WARN") and warn_reason:
+        pdf.set_xy(col1_x + 3.5, row_y)
+        pdf.set_text_color(*C_MUTED)
+        pdf.set_font("Helvetica", "", 6.8)
+        pdf.cell(40.0, 4.4, "Warning Reason")
+
+        pdf.set_font("Helvetica", "I", 6.2)
+        pdf.set_text_color(185, 119, 14)
+        if warn_l2:
+            pdf.set_xy(col1_x + 43.5, row_y)
+            pdf.cell(col_w - 45.0, 2.6, warn_l1)
+            pdf.set_xy(col1_x + 43.5, row_y + 2.6)
+            pdf.cell(col_w - 45.0, 2.6, warn_l2)
+            row_y += 5.6
+        else:
+            pdf.set_xy(col1_x + 43.5, row_y)
+            pdf.cell(col_w - 45.0, 4.4, warn_l1)
+            row_y += row_step
+
+    y_left = row_y
+
+    # Reset cursor for Right Card: Processing & Segmentation Telemetry
+    pdf.set_y(y_start)
+    pdf.set_xy(col2_x + 3.5, y_start + 2.5)
+    pdf.set_text_color(*C_TEXT)
+    pdf.set_font("Helvetica", "B", 8.0)
+    pdf.cell(col_w - 7.0, 4.0, "Processing & Segmentation")
+
+    row_y = y_start + 7.2
+    row_step = 4.6 if len(proc_items) > 6 else 5.2
     for label, val in proc_items:
         pdf.set_xy(col2_x + 3.5, row_y)
         pdf.set_text_color(*C_MUTED)
         pdf.set_font("Helvetica", "", 6.8)
-        pdf.cell(41.0, 4.8, label)
+        lbl_text = fit_text(pdf, label, 40.0, margin=1.0)
+        pdf.cell(40.0, 4.4, lbl_text)
 
         pdf.set_text_color(*C_TEXT)
         pdf.set_font("Helvetica", "B" if label == "Motion Verification Status" else "", 6.8)
-        pdf.cell(col_w - 45.0, 4.8, val)
+        val_text = fit_text(pdf, val, col_w - 45.0, margin=1.5)
+        pdf.cell(col_w - 45.0, 4.4, val_text)
         row_y += row_step
-        pdf.cell(col_w - 45.0, 4.8, val)
-        row_y += 5.2
 
-    curr_y = 92.5
+    y_right = row_y
+
+    # Two-Column Cursor Synchronization
+    curr_y = max(y_start + card_h, max(y_left, y_right)) + 4.5
+    pdf.set_y(curr_y)
 
     # ─────────────────────────────────────────────────────────────────────────
     # 4. Multi-Planar Orthogonal Views (Clean Minimal Triptych)
@@ -606,7 +693,7 @@ def generate_case_pdf(case_dir: Path) -> bytes:
     pdf.set_xy(MARGIN, curr_y)
     pdf.set_text_color(*C_TEXT)
     pdf.set_font("Helvetica", "B", 8.0)
-    pdf.cell(CONTENT_WIDTH, 4.0, "Multi-Planar Orthogonal Views", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(CONTENT_WIDTH, 4.0, "Multi-Planar Orthogonal Views")
 
     comp_bytes, (mid_z, mid_y, mid_x) = _render_orthogonal_composite(case_dir)
     img_h = 34.0
@@ -617,7 +704,7 @@ def generate_case_pdf(case_dir: Path) -> bytes:
             pdf.image(comp_bytes, x=MARGIN, y=img_y, w=CONTENT_WIDTH, h=img_h)
 
             # Minimal slice position labels placed directly below each panel
-            label_y = img_y + img_h + 1.2
+            y_cap = img_y + img_h + 1.5
             panel_mm_w = CONTENT_WIDTH * (240.0 / 732.0)  # ~59.67 mm per panel
             gap_mm = CONTENT_WIDTH * (6.0 / 732.0)        # ~1.49 mm gap
 
@@ -631,13 +718,13 @@ def generate_case_pdf(case_dir: Path) -> bytes:
 
             for p_idx, s_label in enumerate(slice_labels):
                 px = MARGIN + p_idx * (panel_mm_w + gap_mm)
-                pdf.set_xy(px, label_y)
+                pdf.set_xy(px, y_cap)
                 pdf.cell(panel_mm_w, 3.5, s_label, align="C")
 
-            curr_y = label_y + 4.5
+            curr_y = y_cap + 6.0
         except Exception as e:
             logger.warning("Failed to embed composite image in PDF: %s", e)
-            curr_y = img_y + 4.0
+            curr_y = img_y + 6.0
     else:
         pdf.set_fill_color(*C_CARD)
         pdf.set_draw_color(*C_BORDER)
@@ -648,11 +735,11 @@ def generate_case_pdf(case_dir: Path) -> bytes:
         pdf.cell(CONTENT_WIDTH - 8.0, 4.0, "Multi-planar slice reconstruction data not available in workspace.", align="C")
         curr_y = img_y + 18.0
 
+    pdf.set_y(curr_y)
+
     # ─────────────────────────────────────────────────────────────────────────
     # 5. Reconstructed Structures & Quality Audit Table
     # ─────────────────────────────────────────────────────────────────────────
-    curr_y = max(curr_y, 137.0)
-
     pdf.set_xy(MARGIN, curr_y)
     pdf.set_text_color(*C_TEXT)
     pdf.set_font("Helvetica", "B", 8.0)
@@ -712,13 +799,21 @@ def generate_case_pdf(case_dir: Path) -> bytes:
 
             pdf.set_font("Helvetica", "B", 6.8)
             pdf.set_text_color(*C_TEXT)
-            pdf.cell(42.0, 4.8, f" {_humanize_structure_name(st.name)}", border="B", align="L")
+            struct_label = fit_text(pdf, f" {_humanize_structure_name(st.name)}", 42.0, margin=1.5)
+            pdf.cell(42.0, 4.6, struct_label, border="B", align="L")
 
             pdf.set_font("Helvetica", "", 6.8)
-            pdf.cell(24.0, 4.8, f"{vol_cm3:,.2f} ", border="B", align="R")
-            pdf.cell(28.0, 4.8, f"{st.surface_area_mm2:,.0f} ", border="B", align="R")
-            pdf.cell(26.0, 4.8, f"{thk_str} ", border="B", align="R")
-            pdf.cell(26.0, 4.8, f"{hu_str} ", border="B", align="R")
+            vol_fit = fit_text(pdf, f"{vol_cm3:,.2f} ", 24.0, margin=1.5)
+            pdf.cell(24.0, 4.6, vol_fit, border="B", align="R")
+
+            sa_fit = fit_text(pdf, f"{st.surface_area_mm2:,.0f} ", 28.0, margin=1.5)
+            pdf.cell(28.0, 4.6, sa_fit, border="B", align="R")
+
+            thk_fit = fit_text(pdf, f"{thk_str} ", 26.0, margin=1.5)
+            pdf.cell(26.0, 4.6, thk_fit, border="B", align="R")
+
+            hu_fit = fit_text(pdf, f"{hu_str} ", 26.0, margin=1.5)
+            pdf.cell(26.0, 4.6, hu_fit, border="B", align="R")
 
             # Watertight badge
             if st.watertight:
@@ -726,16 +821,16 @@ def generate_case_pdf(case_dir: Path) -> bytes:
             else:
                 pdf.set_text_color(185, 119, 14)
             pdf.set_font("Helvetica", "B", 6.8)
-            pdf.cell(18.0, 4.8, wt_str, border="B", align="C")
+            pdf.cell(18.0, 4.6, wt_str, border="B", align="C")
 
             # Manifold badge
             if st.manifold:
                 pdf.set_text_color(29, 131, 72)
             else:
                 pdf.set_text_color(185, 119, 14)
-            pdf.cell(18.0, 4.8, man_str, border="B", align="C")
+            pdf.cell(18.0, 4.6, man_str, border="B", align="C")
 
-            curr_y += 4.8
+            curr_y += 4.6
 
         if overflow_count > 0:
             pdf.set_draw_color(*C_BORDER)
@@ -749,7 +844,7 @@ def generate_case_pdf(case_dir: Path) -> bytes:
                 border="B",
                 align="C",
             )
-            curr_y += 4.8
+            curr_y += 4.6
 
         pdf.set_xy(MARGIN, curr_y + 1.2)
         pdf.set_text_color(*C_MUTED)
@@ -760,7 +855,7 @@ def generate_case_pdf(case_dir: Path) -> bytes:
             "* Mesh Vol: Watertight 3D surface integral. Discrete 2D voxel mask volume may exhibit minor delta (<1%) due to curvature-preserving smoothing.",
             align="L",
         )
-        curr_y += 4.5
+        curr_y += 4.2
 
     # ─────────────────────────────────────────────────────────────────────────
     # 6. Pinned Footer (Pipeline Timings & Regulatory Disclaimer)
@@ -773,7 +868,8 @@ def generate_case_pdf(case_dir: Path) -> bytes:
     pdf.set_font("Helvetica", "", 6.5)
 
     timings_str = "  ·  ".join([f"{k.capitalize()}: {v:.2f}s" for k, v in report.stage_timings_sec.items()]) if report.stage_timings_sec else f"Total: {total_time:.2f}s"
-    pdf.cell(CONTENT_WIDTH, 3.5, f"Pipeline Execution  ·  Total: {total_time:.2f}s  ·  {timings_str}", align="L")
+    timing_text = fit_text(pdf, f"Pipeline Execution  ·  Total: {total_time:.2f}s  ·  {timings_str}", CONTENT_WIDTH, margin=1.0)
+    pdf.cell(CONTENT_WIDTH, 3.5, timing_text, align="L")
 
     # Divider line
     pdf.set_draw_color(*C_BORDER)
@@ -800,6 +896,8 @@ def generate_case_pdf(case_dir: Path) -> bytes:
         "DICOM series prior to any interventional or operative application."
     )
     pdf.multi_cell(CONTENT_WIDTH - 4.0, 2.8, disclaimer_text, align="C")
+
+    assert pdf.page_no() == 1, f"Expected strictly 1 page report, got {pdf.page_no()}"
 
     pdf_bytes = bytes(pdf.output())
     try:
