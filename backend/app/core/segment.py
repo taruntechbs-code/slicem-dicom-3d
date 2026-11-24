@@ -36,6 +36,7 @@ EngineType = Literal[
     "totalsegmentator_fast",
     "totalsegmentator_full",
     "nnunet_custom",
+    "intensity_otsu",
 ]
 
 CANONICAL_STRUCTURE_COLORS: List[str] = [
@@ -214,6 +215,55 @@ def _segment_ct_bone_threshold(
     label_img.CopyInformation(volume_img)
     label_names = {1: "skull_bone"}
 
+    return label_img, label_names
+
+
+def _segment_intensity_otsu(
+    volume_img: sitk.Image,
+    modality: str,
+) -> Tuple[sitk.Image, Dict[int, str]]:
+    """Segment volumetric anatomy or high-uptake regions via adaptive Otsu thresholding."""
+    vol_arr = sitk.GetArrayViewFromImage(volume_img)
+    mask_arr = None
+
+    try:
+        otsu_filter = sitk.OtsuThresholdImageFilter()
+        otsu_filter.SetInsideValue(0)
+        otsu_filter.SetOutsideValue(1)
+        mask_img = otsu_filter.Execute(volume_img)
+        candidate_arr = sitk.GetArrayViewFromImage(mask_img)
+        fg_count = int(np.sum(candidate_arr > 0))
+        total_count = candidate_arr.size
+        if 20 <= fg_count <= 0.95 * total_count:
+            mask_arr = candidate_arr
+    except Exception as exc:
+        logger.warning("SimpleITK OtsuThreshold failed (%s); using 85th-percentile fallback", exc)
+
+    if mask_arr is None:
+        p85 = float(np.percentile(vol_arr, 85.0))
+        p99 = float(np.percentile(vol_arr, 99.0))
+        if p99 > p85:
+            mask_arr = (vol_arr >= p85).astype(np.uint8)
+        else:
+            v_min, v_max = float(np.min(vol_arr)), float(np.max(vol_arr))
+            if v_max > v_min:
+                mask_arr = (vol_arr > (v_min + 0.5 * (v_max - v_min))).astype(np.uint8)
+            else:
+                mask_arr = np.zeros(vol_arr.shape, dtype=np.uint8)
+
+    label_arr = np.zeros(vol_arr.shape, dtype=np.uint16)
+    label_arr[mask_arr > 0] = 1
+
+    label_img = sitk.GetImageFromArray(label_arr)
+    label_img.CopyInformation(volume_img)
+
+    mod_upper = str(modality).upper()
+    if mod_upper in ("PT", "NM", "PET", "SPECT"):
+        struct_name = "high_uptake_region"
+    else:
+        struct_name = "volumetric_anatomy"
+
+    label_names = {1: struct_name}
     return label_img, label_names
 
 
@@ -461,6 +511,19 @@ def run_segmentation(
 
     t0 = time.time()
 
+    # Safe Routing: TotalSegmentator requires CT or MRI; automatically fall back to adaptive Otsu on other modalities
+    modality_upper = str(report.scan.modality).strip().upper()
+    is_ct_or_mr = modality_upper in ("CT", "MRI", "MR")
+    fallback_reason: Optional[str] = None
+
+    if engine in ("totalsegmentator_fast", "totalsegmentator_full") and not is_ct_or_mr:
+        logger.warning(
+            "TotalSegmentator requested for %s modality which is not CT/MRI. Automatically routing to intensity_otsu.",
+            report.scan.modality,
+        )
+        engine = "intensity_otsu"
+        fallback_reason = "TotalSegmentator supports CT/MRI only; routed to adaptive Otsu volumetric fallback"
+
     # Track VRAM if CUDA is available
     peak_vram_mb: Optional[float] = None
     try:
@@ -491,6 +554,9 @@ def run_segmentation(
     elif engine == "ct_bone_threshold":
         volume_img = sitk.ReadImage(str(vol_path))
         raw_label_img, label_names = _segment_ct_bone_threshold(volume_img)
+    elif engine == "intensity_otsu":
+        volume_img = sitk.ReadImage(str(vol_path))
+        raw_label_img, label_names = _segment_intensity_otsu(volume_img, report.scan.modality)
     elif engine in ("totalsegmentator_fast", "totalsegmentator_full"):
         fast_mode = engine == "totalsegmentator_fast"
         raw_label_img, label_names, actual_device = _segment_totalsegmentator(
@@ -511,7 +577,7 @@ def run_segmentation(
     else:
         raise ValueError(
             f"Unsupported engine '{engine}'. Choose from: "
-            "phantom_threshold, ct_bone_threshold, totalsegmentator_fast, totalsegmentator_full, nnunet_custom."
+            "phantom_threshold, ct_bone_threshold, totalsegmentator_fast, totalsegmentator_full, nnunet_custom, intensity_otsu."
         )
 
     # 3. Topological cleanup & component integrity audit
@@ -602,13 +668,18 @@ def run_segmentation(
         })
 
     # Save labels_meta.json
+    labels_meta_payload: Dict[str, Any] = {
+        "engine": engine,
+        "device": actual_device,
+        "device_used": actual_device,
+        "structures": labels_meta_entries,
+    }
+    if fallback_reason:
+        labels_meta_payload["fallback_reason"] = fallback_reason
+
     labels_meta_file = case_dir / "labels_meta.json"
     with open(labels_meta_file, "w") as f:
-        json.dump({
-            "device": actual_device,
-            "device_used": actual_device,
-            "structures": labels_meta_entries,
-        }, f, indent=2)
+        json.dump(labels_meta_payload, f, indent=2)
 
     # Telemetry
     runtime_sec = round(time.time() - t0, 3)
@@ -631,6 +702,7 @@ def run_segmentation(
     # Update report
     report.segmentation.status = stage_status
     report.segmentation.model_used = engine
+    report.segmentation.fallback_reason = fallback_reason
     report.segmentation.runtime_sec = runtime_sec
     report.segmentation.peak_vram_mb = peak_vram_mb
     report.segmentation.device = actual_device

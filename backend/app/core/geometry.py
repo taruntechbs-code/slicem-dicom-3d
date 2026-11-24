@@ -35,6 +35,8 @@ from app.models.schemas import (
     StageStatus,
 )
 
+UNSUPPORTED_2D_MODALITIES = {"CR", "DX", "MG", "RF", "XA"}
+
 
 class SliceMeta:
     """Container for individual 2D DICOM slice metadata."""
@@ -112,13 +114,13 @@ def unpack_multiframe_dicom(fpath: Path) -> List[SliceMeta]:
         else (ds[0x5200, 0x9229] if (0x5200, 0x9229) in ds else None)
     )
 
-    modality_raw = str(getattr(ds, "Modality", "UNKNOWN")).upper()
+    modality_raw = str(getattr(ds, "Modality", "UNKNOWN")).strip().upper()
     if "CT" in modality_raw:
         modality = "CT"
     elif "MR" in modality_raw:
         modality = "MRI"
     else:
-        modality = "UNKNOWN"
+        modality = modality_raw
 
     rescale_slope_root = float(getattr(ds, "RescaleSlope", 1.0))
     rescale_intercept_root = float(getattr(ds, "RescaleIntercept", 0.0))
@@ -328,6 +330,52 @@ def analyze_dicom_series(
     original_filenames = [f.name for f in dcm_candidates]
     parsed_slices: List[SliceMeta] = []
 
+    # 0. Check Modality upfront on candidate files for 2D projection guardrail
+    detected_modality: Optional[str] = None
+    first_ds: Optional[pydicom.Dataset] = None
+    for fpath in dcm_candidates:
+        try:
+            ds_peek = pydicom.dcmread(str(fpath), force=True, stop_before_pixels=True)
+            if "Modality" in ds_peek and ds_peek.Modality:
+                detected_modality = str(ds_peek.Modality).strip().upper()
+                first_ds = ds_peek
+                break
+        except Exception:
+            continue
+
+    if detected_modality in UNSUPPORTED_2D_MODALITIES:
+        fail_msg = f"2D projection modality ({detected_modality}) — cannot reconstruct 3D volume"
+        rows = int(getattr(first_ds, "Rows", 0)) if first_ds else 0
+        cols = int(getattr(first_ds, "Columns", 0)) if first_ds else 0
+        pixel_spacing = [1.0, 1.0]
+        if first_ds and "PixelSpacing" in first_ds and len(first_ds.PixelSpacing) >= 2:
+            try:
+                pixel_spacing = [float(first_ds.PixelSpacing[0]), float(first_ds.PixelSpacing[1])]
+            except Exception:
+                pass
+
+        report = _create_failure_report(
+            case_id=case_id,
+            warning=fail_msg,
+            elapsed_sec=time.time() - time_start,
+            modality=detected_modality,
+            slice_count=len(dcm_candidates),
+            rows=rows,
+            cols=cols,
+            pixel_spacing=pixel_spacing,
+        )
+        _save_report(report, case_dir)
+        meta = {
+            "case_id": case_id,
+            "modality": detected_modality,
+            "status": "FAIL",
+            "failure_reason": fail_msg,
+            "slice_count": len(dcm_candidates),
+        }
+        with open(case_dir / "geometry_meta.json", "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
+        return report
+
     # Check for single-file multi-frame enhanced DICOM
     if len(dcm_candidates) == 1:
         try:
@@ -342,6 +390,8 @@ def analyze_dicom_series(
         for fpath in dcm_candidates:
             try:
                 ds = pydicom.dcmread(str(fpath), force=True)
+                if first_ds is None:
+                    first_ds = ds
                 if "ImagePositionPatient" not in ds or "ImageOrientationPatient" not in ds:
                     warnings.append(f"File {fpath.name} lacks required IPP/IOP geometry tags.")
                     continue
@@ -373,13 +423,13 @@ def analyze_dicom_series(
                 rows = int(getattr(ds, "Rows", 0))
                 cols = int(getattr(ds, "Columns", 0))
 
-                modality_raw = str(getattr(ds, "Modality", "UNKNOWN")).upper()
+                modality_raw = str(getattr(ds, "Modality", detected_modality or "UNKNOWN")).strip().upper()
                 if "CT" in modality_raw:
                     modality = "CT"
                 elif "MR" in modality_raw:
                     modality = "MRI"
                 else:
-                    modality = "UNKNOWN"
+                    modality = modality_raw
 
                 rescale_slope = float(getattr(ds, "RescaleSlope", 1.0))
                 rescale_intercept = float(getattr(ds, "RescaleIntercept", 0.0))
@@ -411,13 +461,43 @@ def analyze_dicom_series(
             except Exception as exc:
                 warnings.append(f"Failed to read DICOM file {fpath.name}: {exc}")
 
-    if not parsed_slices:
+    # Guardrail: If series has < 3 valid slices or lacks 3D ImagePositionPatient geometry
+    if not parsed_slices or len(parsed_slices) < 3:
+        if detected_modality in UNSUPPORTED_2D_MODALITIES:
+            fail_msg = f"2D projection modality ({detected_modality}) — cannot reconstruct 3D volume"
+        else:
+            slice_num = len(parsed_slices) if parsed_slices else len(dcm_candidates)
+            fail_msg = f"Insufficient 3D slice geometry ({slice_num} slices) — cannot reconstruct 3D volume"
+
+        mod_val = detected_modality or (parsed_slices[0].modality if parsed_slices else "UNKNOWN")
+        r_val = parsed_slices[0].rows if parsed_slices else (int(getattr(first_ds, "Rows", 0)) if first_ds else 0)
+        c_val = parsed_slices[0].cols if parsed_slices else (int(getattr(first_ds, "Columns", 0)) if first_ds else 0)
+        ps_val = parsed_slices[0].pixel_spacing if parsed_slices else (
+            [float(first_ds.PixelSpacing[0]), float(first_ds.PixelSpacing[1])]
+            if first_ds and "PixelSpacing" in first_ds and len(first_ds.PixelSpacing) >= 2
+            else [1.0, 1.0]
+        )
+
         report = _create_failure_report(
             case_id=case_id,
-            warning="No valid geometric DICOM slices could be decoded.",
+            warning=fail_msg,
             elapsed_sec=time.time() - time_start,
+            modality=mod_val,
+            slice_count=len(parsed_slices) if parsed_slices else len(dcm_candidates),
+            rows=r_val,
+            cols=c_val,
+            pixel_spacing=ps_val,
         )
         _save_report(report, case_dir)
+        meta = {
+            "case_id": case_id,
+            "modality": mod_val,
+            "status": "FAIL",
+            "failure_reason": fail_msg,
+            "slice_count": len(parsed_slices) if parsed_slices else len(dcm_candidates),
+        }
+        with open(case_dir / "geometry_meta.json", "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
         return report
 
     # ─── 1. Sort strictly by projection along acquisition normal ───────────────
@@ -526,7 +606,12 @@ def analyze_dicom_series(
             hu_slice = pixel_array * s.rescale_slope + s.rescale_intercept
             volume_slices.append(hu_slice)
         else:
-            volume_slices.append(pixel_array)
+            # Non-CT volumetric modalities (MR, PT, NM, etc.): preserve raw/rescaled float intensities without CT HU clamping
+            if s.rescale_slope != 1.0 or s.rescale_intercept != 0.0:
+                rescaled = pixel_array * s.rescale_slope + s.rescale_intercept
+            else:
+                rescaled = pixel_array
+            volume_slices.append(rescaled)
 
     raw_volume = np.stack(volume_slices, axis=0)  # Shape: (Slices, Rows, Cols)
 
@@ -563,7 +648,7 @@ def analyze_dicom_series(
     overall_status: CaseStatus = "pass" if len(warnings) == 0 else "warn"
 
     scan_report = ScanReport(
-        modality=first_slice.modality if first_slice.modality in ("CT", "MRI", "UNKNOWN") else "UNKNOWN",  # type: ignore
+        modality=first_slice.modality,
         slice_count=len(sorted_slices),
         rows=first_slice.rows,
         cols=first_slice.cols,
@@ -620,18 +705,27 @@ def analyze_dicom_series(
     return case_report
 
 
-def _create_failure_report(case_id: str, warning: str, elapsed_sec: float) -> CaseReport:
+def _create_failure_report(
+    case_id: str,
+    warning: str,
+    elapsed_sec: float,
+    modality: str = "UNKNOWN",
+    slice_count: int = 0,
+    rows: int = 0,
+    cols: int = 0,
+    pixel_spacing: Optional[List[float]] = None,
+) -> CaseReport:
     """Helper to construct a FAIL report when series cannot be parsed."""
     return CaseReport(
         case_id=case_id,
         created_at=datetime.utcnow().isoformat() + "Z",
         status="fail",
         scan=ScanReport(
-            modality="UNKNOWN",
-            slice_count=0,
-            rows=0,
-            cols=0,
-            pixel_spacing_mm=[1.0, 1.0],
+            modality=modality,
+            slice_count=slice_count,
+            rows=rows,
+            cols=cols,
+            pixel_spacing_mm=pixel_spacing if pixel_spacing is not None else [1.0, 1.0],
             declared_thickness_mm=None,
         ),
         geometry=GeometryReport(
@@ -731,8 +825,12 @@ def correct_volume_geometry(
     tilt_deg = float(meta.get("gantry_tilt_deg", 0.0))
     deskew_applied = abs(tilt_deg) > 0.5
     sorted_ipps = meta.get("sorted_ipps")
-    modality = meta.get("modality", "CT")
-    default_bg = -1000.0 if modality == "CT" else 0.0
+    modality = str(meta.get("modality", "CT")).upper()
+    if modality == "CT":
+        default_bg = -1000.0
+    else:
+        vol_min = float(np.min(vol_raw))
+        default_bg = vol_min if vol_min < 0.0 else 0.0
     iso_spacing = float(isotropic_spacing_mm)
 
     S, R, C = vol_raw.shape

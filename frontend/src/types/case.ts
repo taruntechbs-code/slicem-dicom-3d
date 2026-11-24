@@ -6,7 +6,7 @@
 
 export type CaseStatus = 'pending' | 'running' | 'pass' | 'warn' | 'fail';
 export type StageStatus = 'PASS' | 'WARN' | 'FAIL' | 'PENDING';
-export type ScanModality = 'CT' | 'MRI' | 'UNKNOWN';
+export type ScanModality = 'CT' | 'MRI' | 'PT' | 'NM' | 'CR' | 'DX' | 'MG' | 'RF' | 'XA' | 'UNKNOWN' | string;
 
 export interface ScanReport {
   modality: ScanModality;
@@ -45,6 +45,7 @@ export interface SegmentationReport {
   device?: string | null;
   device_used?: string | null;
   warnings: string[];
+  fallback_reason?: string | null;
 }
 
 export interface StructureReport {

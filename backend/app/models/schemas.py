@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 CaseStatus = Literal["pending", "running", "pass", "warn", "fail"]
 StageStatus = Literal["PASS", "WARN", "FAIL", "PENDING"]
-ScanModality = Literal["CT", "MRI", "UNKNOWN"]
+ScanModality = str
 
 
 class ScanReport(BaseModel):
@@ -13,7 +13,7 @@ class ScanReport(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    modality: ScanModality = Field(..., description="Modality of the scan (CT, MRI, UNKNOWN)")
+    modality: ScanModality = Field(..., description="Modality of the scan (CT, MRI, PT, NM, DX, CR, UNKNOWN, etc.)")
     slice_count: int = Field(..., ge=0, description="Total number of 2D slices in the volume")
     rows: int = Field(..., ge=0, description="Matrix height in pixels")
     cols: int = Field(..., ge=0, description="Matrix width in pixels")
@@ -118,6 +118,10 @@ class SegmentationReport(BaseModel):
     warnings: List[str] = Field(
         default_factory=list,
         description="Segmentation warnings or caveats",
+    )
+    fallback_reason: Optional[str] = Field(
+        default=None,
+        description="Explanation if an automatic fallback engine was chosen",
     )
 
 

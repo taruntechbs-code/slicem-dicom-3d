@@ -154,12 +154,12 @@ def compute_structure_analytics(
         area_a = float(mesh_data.get("surface_area_mm2", 0.0))
         sphericity = compute_sphericity(vol_v, area_a)
 
-        # Tissue composition for CT scans
+        # Tissue composition for CT scans (skipped / None for non-CT modalities)
         is_ct = getattr(report.scan, "modality", "UNKNOWN") == "CT"
         tissue_comp = (
             compute_tissue_composition(intensities)
             if (is_ct and len(intensities) > 0)
-            else meta_entry.get("tissue_composition")
+            else (meta_entry.get("tissue_composition") if is_ct else None)
         )
 
         st_report = StructureReport(

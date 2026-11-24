@@ -62,7 +62,7 @@ class CorrectionRequest(BaseModel):
 class SegmentRequest(BaseModel):
     """Request payload for Stop 4 anatomical segmentation."""
 
-    engine: str = Field(default="phantom_threshold", description="Segmentation engine name")
+    engine: str = Field(default="phantom_threshold", description="Segmentation engine name (phantom_threshold, ct_bone_threshold, totalsegmentator_fast, totalsegmentator_full, nnunet_custom, intensity_otsu)")
     roi_subset: Optional[List[str]] = Field(default=None, description="Optional ROI structure subset")
     sync: bool = Field(default=False, description="Whether to run synchronously instead of background task")
     task: Optional[str] = Field(default=None, description="Optional TotalSegmentator task override (e.g. total, total_mr, breasts, heartchambers_highres)")

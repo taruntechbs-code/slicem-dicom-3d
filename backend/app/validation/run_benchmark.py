@@ -464,7 +464,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--engine",
-        choices=["totalsegmentator_fast", "totalsegmentator_full", "nnunet_custom", "phantom_threshold"],
+        choices=["totalsegmentator_fast", "totalsegmentator_full", "nnunet_custom", "phantom_threshold", "intensity_otsu"],
         default="phantom_threshold",
         help="Segmentation engine to evaluate",
     )

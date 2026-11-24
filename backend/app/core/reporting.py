@@ -202,6 +202,7 @@ def _humanize_engine_name(engine: Optional[str]) -> str:
         "totalsegmentator_fast": "TotalSegmentator (Fast)",
         "totalsegmentator_full": "TotalSegmentator (Full)",
         "nnunet_custom": "nnU-Net Custom (ACDC)",
+        "intensity_otsu": "Adaptive Otsu Threshold",
     }
     return mapping.get(engine, clean_pdf_text(engine).title())
 
@@ -752,12 +753,13 @@ def generate_case_pdf(case_dir: Path) -> bytes:
     curr_y += 4.5
 
     # Columns (Total: 182.0 mm)
+    intensity_header = "Intensity (HU)" if report.scan.modality == "CT" else "Intensity"
     cols = [
         ("Structure", 42.0, "L"),
         ("Mesh Vol (cm3)*", 24.0, "R"),
         ("Surface Area (mm2)", 28.0, "R"),
         ("Mean Thk (mm)", 26.0, "R"),
-        ("Intensity (HU)", 26.0, "R"),
+        (intensity_header, 26.0, "R"),
         ("Watertight", 18.0, "C"),
         ("Manifold", 18.0, "C"),
     ]
