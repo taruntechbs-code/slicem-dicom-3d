@@ -16,7 +16,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pydicom
@@ -36,6 +36,64 @@ from app.models.schemas import (
 )
 
 UNSUPPORTED_2D_MODALITIES = {"CR", "DX", "MG", "RF", "XA"}
+
+NON_DICOM_EXTENSIONS = {
+    ".txt", ".json", ".md", ".csv", ".xml", ".pdf", ".html",
+    ".zip", ".tar", ".gz", ".png", ".jpg", ".jpeg", ".bmp", ".gif"
+}
+IGNORED_FILENAMES = {
+    "CITATION.TXT", "CITATION", "README.TXT", "README.MD", "README",
+    "LICENSE.TXT", "LICENSE", "MANIFEST.JSON", ".DS_STORE", "PHANTOM_TRUTH.JSON"
+}
+
+
+def is_ignored_dicom_candidate(filepath: Union[Path, str]) -> bool:
+    """Return True if path is a hidden file, AppleDouble resource fork, or non-DICOM asset."""
+    p = Path(filepath)
+    p_str = str(filepath).replace("\\", "/")
+    if "__macosx" in p_str.lower() or any("__macosx" in part.lower() for part in p.parts):
+        return True
+    if any(part.startswith(".") for part in p.parts) or p.name.startswith("._") or p.name.startswith("."):
+        return True
+    if p.suffix.lower() in NON_DICOM_EXTENSIONS or p.name.upper() in IGNORED_FILENAMES:
+        return True
+    return False
+
+
+def normalize_modality(raw_mod: Optional[str]) -> str:
+    """Normalize DICOM Modality tag to canonical modality string.
+
+    Rules:
+      - "CT" -> "CT"
+      - "MR", "MRI" -> "MRI"
+      - "PT", "PET" -> "PT"
+      - "NM", "SPECT" -> "NM"
+      - "CBCT" -> "CBCT"
+      - Others (e.g. "CR", "DX", "MG", "RF", "XA", "US", "OT") -> uppercase stripped string
+      - None / empty -> "UNKNOWN"
+    """
+    if not raw_mod:
+        return "UNKNOWN"
+    m = str(raw_mod).strip().upper()
+    if m in ("CT", "CBCT"):
+        return m
+    if m in ("MR", "MRI"):
+        return "MRI"
+    if m in ("PT", "PET"):
+        return "PT"
+    if m in ("NM", "SPECT"):
+        return "NM"
+    if "CBCT" in m:
+        return "CBCT"
+    if "PET" in m or m.startswith("PT"):
+        return "PT"
+    if "SPECT" in m or m.startswith("NM"):
+        return "NM"
+    if "MR" in m:
+        return "MRI"
+    if "CT" in m:
+        return "CT"
+    return m or "UNKNOWN"
 
 
 class SliceMeta:
@@ -114,13 +172,8 @@ def unpack_multiframe_dicom(fpath: Path) -> List[SliceMeta]:
         else (ds[0x5200, 0x9229] if (0x5200, 0x9229) in ds else None)
     )
 
-    modality_raw = str(getattr(ds, "Modality", "UNKNOWN")).strip().upper()
-    if "CT" in modality_raw:
-        modality = "CT"
-    elif "MR" in modality_raw:
-        modality = "MRI"
-    else:
-        modality = modality_raw
+    modality_raw = ds.get("Modality")
+    modality = normalize_modality(str(modality_raw) if modality_raw else None)
 
     rescale_slope_root = float(getattr(ds, "RescaleSlope", 1.0))
     rescale_intercept_root = float(getattr(ds, "RescaleIntercept", 0.0))
@@ -310,11 +363,7 @@ def analyze_dicom_series(
         [
             f
             for f in dicom_dir.rglob("*")
-            if f.is_file()
-            and not f.name.startswith(".")
-            and not f.name.startswith("._")
-            and "__MACOSX" not in f.parts
-            and f.name != "phantom_truth.json"
+            if f.is_file() and not is_ignored_dicom_candidate(f)
         ]
     )
 
@@ -335,9 +384,12 @@ def analyze_dicom_series(
     first_ds: Optional[pydicom.Dataset] = None
     for fpath in dcm_candidates:
         try:
+            if fpath.stat().st_size < 512:
+                continue
             ds_peek = pydicom.dcmread(str(fpath), force=True, stop_before_pixels=True)
-            if "Modality" in ds_peek and ds_peek.Modality:
-                detected_modality = str(ds_peek.Modality).strip().upper()
+            mod = ds_peek.get("Modality")
+            if mod:
+                detected_modality = normalize_modality(str(mod))
                 first_ds = ds_peek
                 break
         except Exception:
@@ -389,8 +441,10 @@ def analyze_dicom_series(
     if not parsed_slices:
         for fpath in dcm_candidates:
             try:
+                if fpath.stat().st_size < 512:
+                    continue
                 ds = pydicom.dcmread(str(fpath), force=True)
-                if first_ds is None:
+                if first_ds is None or getattr(first_ds, "Modality", None) is None:
                     first_ds = ds
                 if "ImagePositionPatient" not in ds or "ImageOrientationPatient" not in ds:
                     warnings.append(f"File {fpath.name} lacks required IPP/IOP geometry tags.")
@@ -423,13 +477,8 @@ def analyze_dicom_series(
                 rows = int(getattr(ds, "Rows", 0))
                 cols = int(getattr(ds, "Columns", 0))
 
-                modality_raw = str(getattr(ds, "Modality", detected_modality or "UNKNOWN")).strip().upper()
-                if "CT" in modality_raw:
-                    modality = "CT"
-                elif "MR" in modality_raw:
-                    modality = "MRI"
-                else:
-                    modality = modality_raw
+                slice_mod_raw = ds.get("Modality")
+                modality = normalize_modality(str(slice_mod_raw) if slice_mod_raw else detected_modality)
 
                 rescale_slope = float(getattr(ds, "RescaleSlope", 1.0))
                 rescale_intercept = float(getattr(ds, "RescaleIntercept", 0.0))
@@ -623,7 +672,7 @@ def analyze_dicom_series(
     meta = {
         "case_id": case_id,
         "shape": list(raw_volume.shape),
-        "modality": first_slice.modality,
+        "modality": normalize_modality(first_slice.modality),
         "pixel_spacing_mm": first_slice.pixel_spacing,
         "measured_spacing_mm": measured_spacing_mm,
         "declared_thickness_mm": declared_thickness_mm,
@@ -648,7 +697,7 @@ def analyze_dicom_series(
     overall_status: CaseStatus = "pass" if len(warnings) == 0 else "warn"
 
     scan_report = ScanReport(
-        modality=first_slice.modality,
+        modality=normalize_modality(first_slice.modality),
         slice_count=len(sorted_slices),
         rows=first_slice.rows,
         cols=first_slice.cols,
@@ -716,12 +765,13 @@ def _create_failure_report(
     pixel_spacing: Optional[List[float]] = None,
 ) -> CaseReport:
     """Helper to construct a FAIL report when series cannot be parsed."""
+    norm_mod = normalize_modality(modality)
     return CaseReport(
         case_id=case_id,
         created_at=datetime.utcnow().isoformat() + "Z",
         status="fail",
         scan=ScanReport(
-            modality=modality,
+            modality=norm_mod,
             slice_count=slice_count,
             rows=rows,
             cols=cols,
@@ -825,7 +875,7 @@ def correct_volume_geometry(
     tilt_deg = float(meta.get("gantry_tilt_deg", 0.0))
     deskew_applied = abs(tilt_deg) > 0.5
     sorted_ipps = meta.get("sorted_ipps")
-    modality = str(meta.get("modality", "CT")).upper()
+    modality = normalize_modality(meta.get("modality", "CT"))
     if modality == "CT":
         default_bg = -1000.0
     else:

@@ -24,6 +24,7 @@ from PIL import Image, ImageDraw
 import scipy.ndimage
 import SimpleITK as sitk
 
+from app.core.geometry import normalize_modality
 from app.models.schemas import CaseReport
 
 logger = logging.getLogger("slicem.reporting")
@@ -753,7 +754,8 @@ def generate_case_pdf(case_dir: Path) -> bytes:
     curr_y += 4.5
 
     # Columns (Total: 182.0 mm)
-    intensity_header = "Intensity (HU)" if report.scan.modality == "CT" else "Intensity"
+    is_ct = normalize_modality(report.scan.modality) == "CT"
+    intensity_header = "Intensity (HU)" if is_ct else "Intensity"
     cols = [
         ("Structure", 42.0, "L"),
         ("Mesh Vol (cm3)*", 24.0, "R"),

@@ -26,6 +26,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 import numpy as np
 import SimpleITK as sitk
 
+from app.core.geometry import normalize_modality
 from app.models.schemas import CaseReport, StageStatus, StructureReport
 
 logger = logging.getLogger("slicem.segment")
@@ -257,8 +258,8 @@ def _segment_intensity_otsu(
     label_img = sitk.GetImageFromArray(label_arr)
     label_img.CopyInformation(volume_img)
 
-    mod_upper = str(modality).upper()
-    if mod_upper in ("PT", "NM", "PET", "SPECT"):
+    mod_upper = normalize_modality(modality)
+    if mod_upper in ("PT", "NM"):
         struct_name = "high_uptake_region"
     else:
         struct_name = "volumetric_anatomy"
@@ -325,13 +326,19 @@ def _segment_totalsegmentator(
     else:
         target_device = "cpu"
 
+    norm_mod = normalize_modality(modality)
+    if norm_mod not in ("CT", "MR", "MRI"):
+        raise ValueError(
+            f"TotalSegmentator only supports CT and MR/MRI modalities (got '{modality}')."
+        )
+
     if task:
         if task == "heartchambers_highres" and not os.environ.get("TOTALSEG_LICENSE_KEY"):
             raise ValueError(
                 "Task 'heartchambers_highres' requires TOTALSEG_LICENSE_KEY environment variable to be configured."
             )
         chosen_task = task
-    elif modality in ("MRI", "MR"):
+    elif norm_mod in ("MRI", "MR"):
         chosen_task = "total_mr"
     else:
         chosen_task = "total"
@@ -512,17 +519,31 @@ def run_segmentation(
     t0 = time.time()
 
     # Safe Routing: TotalSegmentator requires CT or MRI; automatically fall back to adaptive Otsu on other modalities
-    modality_upper = str(report.scan.modality).strip().upper()
-    is_ct_or_mr = modality_upper in ("CT", "MRI", "MR")
+    raw_mod = getattr(report.scan, "modality", None)
+    if not raw_mod or str(raw_mod).strip().upper() == "UNKNOWN":
+        geom_meta_file = case_dir / "geometry_meta.json"
+        if geom_meta_file.is_file():
+            try:
+                g_meta = json.loads(geom_meta_file.read_text())
+                raw_mod = g_meta.get("modality")
+            except Exception:
+                pass
+
+    persisted_modality = normalize_modality(raw_mod)
+    is_ct_or_mr = persisted_modality in {"CT", "MR", "MRI"}
     fallback_reason: Optional[str] = None
 
     if engine in ("totalsegmentator_fast", "totalsegmentator_full") and not is_ct_or_mr:
+        detected_label = report.scan.modality if report.scan.modality != "UNKNOWN" else persisted_modality
+        fallback_reason = (
+            f"TotalSegmentator supports CT/MRI only (detected {detected_label}); "
+            "routed to adaptive Otsu volumetric fallback"
+        )
         logger.warning(
             "TotalSegmentator requested for %s modality which is not CT/MRI. Automatically routing to intensity_otsu.",
-            report.scan.modality,
+            detected_label,
         )
         engine = "intensity_otsu"
-        fallback_reason = "TotalSegmentator supports CT/MRI only; routed to adaptive Otsu volumetric fallback"
 
     # Track VRAM if CUDA is available
     peak_vram_mb: Optional[float] = None

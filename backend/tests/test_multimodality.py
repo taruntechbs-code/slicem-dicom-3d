@@ -9,9 +9,11 @@ Coverage:
    and 1-page PDF report with non-HU "Intensity" header.
 """
 
+import io
 import json
 from pathlib import Path
 import re
+import zipfile
 import zlib
 
 import numpy as np
@@ -316,7 +318,7 @@ def test_end_to_end_pt_volumetric_fallback_pipeline(tmp_path: Path):
     assert report_stage4.segmentation.status == "PASS"
     assert report_stage4.segmentation.model_used == "intensity_otsu"
     assert report_stage4.segmentation.fallback_reason == (
-        "TotalSegmentator supports CT/MRI only; routed to adaptive Otsu volumetric fallback"
+        "TotalSegmentator supports CT/MRI only (detected PT); routed to adaptive Otsu volumetric fallback"
     )
     assert (case_dir / "labels.nii.gz").is_file()
     assert (case_dir / "labels_meta.json").is_file()
@@ -325,7 +327,7 @@ def test_end_to_end_pt_volumetric_fallback_pipeline(tmp_path: Path):
         meta_labels = json.load(f)
     assert meta_labels["engine"] == "intensity_otsu"
     assert meta_labels["fallback_reason"] == (
-        "TotalSegmentator supports CT/MRI only; routed to adaptive Otsu volumetric fallback"
+        "TotalSegmentator supports CT/MRI only (detected PT); routed to adaptive Otsu volumetric fallback"
     )
     assert any(s["name"] == "high_uptake_region" for s in meta_labels["structures"])
 
@@ -378,3 +380,92 @@ def test_end_to_end_pt_volumetric_fallback_pipeline(tmp_path: Path):
     assert "Intensity" in full_pdf_text
     assert "Intensity (HU)" not in full_pdf_text
     assert "High Uptake Region" in full_pdf_text
+
+
+def test_zip_upload_with_macosx_junk_and_pt_modality(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test 5: Verify real PET zip uploads with macOS junk and CITATION.txt are parsed as PT (not UNKNOWN)
+    and TotalSegmentator safely auto-routes to intensity_otsu with high_uptake_region.
+    """
+    monkeypatch.setattr("app.config.WORKSPACE_DIR", tmp_path / "workspace")
+    from app.main import app
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+
+    # 1. Generate 6 valid PT slices
+    pt_slice_dir = tmp_path / "pt_slices"
+    _create_synthetic_pt_series(
+        output_dir=pt_slice_dir,
+        num_slices=6,
+        rows=32,
+        cols=32,
+        pixel_spacing=(1.5, 1.5),
+        slice_spacing=3.0,
+        gantry_tilt_deg=0.0,
+        hotspot_radius_mm=5.0,
+        background_suv=0.1,
+        hotspot_suv=20.0,
+    )
+    pt_files = sorted(pt_slice_dir.glob("*.dcm"))
+    assert len(pt_files) == 6
+
+    # 2. Package into a zip containing macOS junk and non-DICOM text files
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w") as zf:
+        for f in pt_files:
+            zf.write(f, arcname=f"pt_series/{f.name}")
+        # Inject fake macOS AppleDouble resource forks (212 bytes) and hidden files
+        zf.writestr("__MACOSX/._pt_series", b"\x00\x05\x16\x07" + b"\x00" * 208)
+        zf.writestr("__MACOSX/pt_series/._instance-0001.dcm", b"\x00\x05\x16\x07" + b"\x00" * 208)
+        zf.writestr("pt_series/._instance-0002.dcm", b"\x00\x05\x16\x07" + b"\x00" * 208)
+        zf.writestr("pt_series/.DS_Store", b"Finder desktop services")
+        # Inject non-DICOM documentation files
+        zf.writestr("pt_series/CITATION.txt", b"Citation: ACRIN NSCLC PET-CT study (2024)")
+        zf.writestr("README.md", b"# PET series documentation")
+
+    zip_buffer.seek(0)
+
+    # 3. Upload via POST /api/cases/upload
+    res_upload = client.post(
+        "/api/cases/upload",
+        files={"files": ("pt-whole-body-acrin-nsclc-series.zip", zip_buffer.getvalue(), "application/zip")},
+    )
+    assert res_upload.status_code == 200, res_upload.text
+    case_data = res_upload.json()
+    case_id = case_data["case_id"]
+
+    # Ingestion must skip __MACOSX and non-DICOM text files, correctly classifying as PT
+    assert case_data["scan"]["modality"] == "PT"
+    assert case_data["scan"]["slice_count"] == 6
+    assert case_data["geometry"]["status"] in ("PASS", "WARN")
+
+    # Verify GET /api/cases returns the real persisted modality PT (not UNKNOWN)
+    res_cases = client.get("/api/cases")
+    assert res_cases.status_code == 200
+    matching_case = next((c for c in res_cases.json() if c["case_id"] == case_id), None)
+    assert matching_case is not None
+    assert matching_case["scan"]["modality"] == "PT"
+
+    # 4. Run Stage 2: Geometric correction
+    res_corr = client.post(
+        f"/api/cases/{case_id}/correct",
+        json={"isotropic_spacing_mm": 1.5, "apply_motion_correction": False},
+    )
+    assert res_corr.status_code == 200
+    assert res_corr.json()["scan"]["modality"] == "PT"
+
+    # 5. Run Stage 4: Segmentation requesting TotalSegmentator
+    # Must auto-route to intensity_otsu (TotalSegmentator is NOT invoked)
+    res_seg = client.post(
+        f"/api/cases/{case_id}/segment",
+        json={"engine": "totalsegmentator_fast", "sync": True},
+    )
+    assert res_seg.status_code == 200
+    seg_data = res_seg.json()
+    assert seg_data["segmentation"]["status"] in ("PASS", "WARN")
+    assert seg_data["segmentation"]["model_used"] == "intensity_otsu"
+    assert seg_data["segmentation"]["fallback_reason"] == (
+        "TotalSegmentator supports CT/MRI only (detected PT); routed to adaptive Otsu volumetric fallback"
+    )
+    assert len(seg_data["structures"]) >= 1
+    assert seg_data["structures"][0]["name"] == "high_uptake_region"

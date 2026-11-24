@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import SimpleITK as sitk
 
+from app.core.geometry import normalize_modality
 from app.core.segment import get_canonical_structure_color
 from app.models.schemas import CaseReport, StructureReport
 
@@ -155,7 +156,7 @@ def compute_structure_analytics(
         sphericity = compute_sphericity(vol_v, area_a)
 
         # Tissue composition for CT scans (skipped / None for non-CT modalities)
-        is_ct = getattr(report.scan, "modality", "UNKNOWN") == "CT"
+        is_ct = normalize_modality(getattr(report.scan, "modality", "UNKNOWN")) == "CT"
         tissue_comp = (
             compute_tissue_composition(intensities)
             if (is_ct and len(intensities) > 0)

@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Loader2,
   Check,
+  Info,
 } from 'lucide-react';
 
 import { api, PhantomParams, PresetMeta } from './lib/api';
@@ -1509,6 +1510,7 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
                 <option value="totalsegmentator_fast">TotalSegmentator (Fast)</option>
                 <option value="totalsegmentator_full">TotalSegmentator (Full)</option>
                 <option value="nnunet_custom">nnU-Net Custom (ACDC Cardiac)</option>
+                <option value="intensity_otsu">Adaptive Otsu (PET / SPECT / Non-CT)</option>
               </select>
             </div>
 
@@ -1564,6 +1566,13 @@ const SegmentStepView: React.FC<SegmentStepViewProps> = ({
         <div className="p-3.5 rounded-2xl bg-[#FF453A]/10 border border-[#FF453A]/20 text-xs text-[#FF453A] flex items-center gap-2">
           <AlertCircle className="w-4 h-4 shrink-0" />
           <span>{errorMessage}</span>
+        </div>
+      )}
+
+      {s.fallback_reason && (
+        <div className="p-3.5 rounded-2xl bg-[#0A84FF]/10 border border-[#0A84FF]/20 text-xs text-[#0A84FF] flex items-center gap-2">
+          <Info className="w-4 h-4 shrink-0" />
+          <span>{s.fallback_reason}</span>
         </div>
       )}
 

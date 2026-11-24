@@ -20,7 +20,12 @@ import SimpleITK as sitk
 
 from app import config
 from app.core.analytics import compute_structure_analytics
-from app.core.geometry import analyze_dicom_series, correct_volume_geometry
+from app.core.geometry import (
+    analyze_dicom_series,
+    correct_volume_geometry,
+    is_ignored_dicom_candidate,
+    normalize_modality,
+)
 from app.core.mesh import generate_structure_meshes
 from app.core.motion import correct_slice_motion, inject_slice_motion
 from app.core.phantoms import generate_sphere_phantom
@@ -94,6 +99,18 @@ def list_cases() -> List[CaseReport]:
                     with open(report_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
                     case_report = CaseReport.model_validate(data)
+                    # Normalize modality and check geometry_meta.json if UNKNOWN
+                    norm_mod = normalize_modality(case_report.scan.modality)
+                    if norm_mod == "UNKNOWN":
+                        geom_meta_file = item / "geometry_meta.json"
+                        if geom_meta_file.is_file():
+                            try:
+                                g_data = json.loads(geom_meta_file.read_text())
+                                if g_data.get("modality"):
+                                    norm_mod = normalize_modality(g_data["modality"])
+                            except Exception:
+                                pass
+                    case_report.scan.modality = norm_mod
                     valid_cases.append(case_report)
                 except Exception:
                     # Ignore invalid/corrupt case directories during scanning
@@ -157,21 +174,16 @@ async def upload_dicom_series(files: List[UploadFile] = File(...)) -> CaseReport
             if filename.lower().endswith(".zip"):
                 with zipfile.ZipFile(io.BytesIO(content)) as z:
                     for member in z.namelist():
-                        p = Path(member)
-                        if (
-                            member.endswith("/")
-                            or "__MACOSX" in member
-                            or p.name.startswith(".")
-                            or p.name.startswith("._")
-                        ):
+                        if is_ignored_dicom_candidate(member):
                             continue
+                        p = Path(member)
                         target_path = raw_dicom_dir / p.name
                         with z.open(member) as source, open(target_path, "wb") as dest:
                             shutil.copyfileobj(source, dest)
             else:
-                p = Path(filename)
-                if "__MACOSX" in filename or p.name.startswith(".") or p.name.startswith("._"):
+                if is_ignored_dicom_candidate(filename):
                     continue
+                p = Path(filename)
                 dest_path = raw_dicom_dir / p.name
                 with open(dest_path, "wb") as f:
                     f.write(content)

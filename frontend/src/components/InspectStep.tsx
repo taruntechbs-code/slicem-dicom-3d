@@ -646,8 +646,8 @@ export const InspectStep: React.FC<InspectStepProps> = ({
                     {selectedStructure.intensity_mean.toLocaleString('en-US', {
                       minimumFractionDigits: 1,
                       maximumFractionDigits: 1,
-                    })}{' '}
-                    HU
+                    })}
+                    {scan.modality === 'CT' ? ' HU' : ''}
                   </span>
                 </div>
 
@@ -689,7 +689,7 @@ export const InspectStep: React.FC<InspectStepProps> = ({
                 )}
 
                 {/* Tissue Composition Breakdown (CT Scans) */}
-                {selectedStructure.tissue_composition && (
+                {selectedStructure.tissue_composition && scan.modality === 'CT' && (
                   <div className="p-2.5 rounded-xl bg-[#1C1C1E]/60 border border-white/[0.04] space-y-2 col-span-2">
                     <div className="flex items-center justify-between text-[11px]">
                       <span className="text-[#86868B] font-medium">Tissue Composition</span>
